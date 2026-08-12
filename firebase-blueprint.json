@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "CompanyRecord": {
+      "title": "Company Record",
+      "description": "Irish business record with web search & lead enrichment info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "companyNumber": { "type": "string" },
+        "county": { "type": "string" },
+        "official_website_url": { "type": "string" },
+        "confidence_score": { "type": "string" },
+        "match_type": { "type": "string" },
+        "notes": { "type": "string" },
+        "decisionMakerName": { "type": "string" },
+        "decisionMakerRole": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "industry": { "type": "string" },
+        "status": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "companyName", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile collection"
+    },
+    "/users/{userId}/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/CompanyRecord" },
+      "description": "Saved company records for a user"
+    }
+  }
+}

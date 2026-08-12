@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Irish B2B Website & Intelligence Finder</title>
+    <script>
+      (function() {
+        try {
+          var proto = window;
+          while (proto && !Object.getOwnPropertyDescriptor(proto, 'fetch')) {
+            proto = Object.getPrototypeOf(proto);
+          }
+          if (proto) {
+            var desc = Object.getOwnPropertyDescriptor(proto, 'fetch');
+            if (desc && (!desc.writable || !desc.set) && desc.configurable) {
+              var currentFetch = window.fetch;
+              Object.defineProperty(window, 'fetch', {
+                get: function() { return currentFetch; },
+                set: function(v) { currentFetch = v; },
+                configurable: true,
+                enumerable: true
+              });
+            }
+          }
+        } catch (e) {
+          // Safe fallback
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
