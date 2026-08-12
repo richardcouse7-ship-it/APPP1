@@ -1,6 +1,5 @@
 import Papa from 'papaparse';
 import { CompanyRecord } from '../types';
-import { getDedupKey, cleanNullableField } from './normalize';
 
 const IRISH_COUNTIES = new Set([
   'antrim', 'armagh', 'carlow', 'cavan', 'clare', 'cork', 'derry', 'donegal',
@@ -15,9 +14,8 @@ export function isNumericCroNumber(val: string): boolean {
   if (!val) return false;
   const clean = val.trim();
   if (clean.length === 0) return false;
-  if (EIRCODE_PATTERN.test(clean)) return false; // Eircodes are NOT CRO numbers
   if (/^\d{3,10}$/.test(clean)) return true;
-  if (/^(cro|reg|inc|no|id|kmt|num)[-:\s]*\d+/i.test(clean)) return true;
+  if (/^(cro|reg|inc|no|id|kmt|num|code)[-:\s]*\d+/i.test(clean)) return true;
   const digitCount = (clean.match(/\d/g) || []).length;
   if (clean.length <= 12 && digitCount >= 3 && digitCount / clean.length >= 0.6) return true;
   return false;
@@ -29,7 +27,6 @@ export function isCompanyName(val: string): boolean {
   const clean = val.trim();
   if (clean.length < 2) return false;
   if (/^\d+$/.test(clean)) return false;
-  if (EIRCODE_PATTERN.test(clean)) return false; // Eircodes are NOT company names
   const lower = clean.toLowerCase();
   const corporateKeywords = [
     'ltd', 'limited', 'plc', 'dac', 'group', 'holdings', 'co', 'co.', 'co-op',
@@ -66,22 +63,6 @@ export function isCountyName(val: string): boolean {
   return IRISH_COUNTIES.has(clean);
 }
 
-const EIRCODE_PATTERN = /^[A-Za-z]\d[A-Za-z0-9]\s?[A-Za-z0-9]{4}$/;
-
-export function extractEircodeFromRow(row: any): string | null {
-  if (!row) return null;
-  const candidateKeys = Object.keys(row).filter((k) =>
-    /eircode|eir_code|eir\s*code|postcode|postal_code|postal\s*code|zip/i.test(k)
-  );
-  for (const key of candidateKeys) {
-    const val = (row[key] || '').toString().trim();
-    if (val && EIRCODE_PATTERN.test(val)) {
-      return val.toUpperCase();
-    }
-  }
-  return null;
-}
-
 export interface SmartExtractResult {
   records: CompanyRecord[];
   autoCorrections: string[];
@@ -105,22 +86,22 @@ export function smartExtractAndHealRecords(
 
   // 1. Initial Keyword Header Identification
   let companyNumberKey = headers.find((h) =>
-    /^(company_num|cro_number|company_number|company\s*number|cro|kmt|reg\s*no|registration)$/i.test(h)
+    /^(company_num|cro_number|company_number|company\s*number|cro|kmt|reg\s*no|registration|number|id|code|ref)$/i.test(h)
   ) || headers.find((h) =>
-    /company_num|cro_number|company\s*number|cro|kmt|reg\s*no|registration/i.test(h) && !/eircode|eir_code|postcode|postal/i.test(h)
-  ) || '';
+    /company_num|cro_number|company\s*number|cro|kmt|reg\s*no|registration|number|id|code|ref/i.test(h)
+  ) || headers[0];
 
   let companyNameKey = headers.find((h) =>
     /^(company_name|business_name|company\s*name|business\s*name)$/i.test(h)
   ) || headers.find((h) =>
     /company\s*name|business\s*name|firm|organization|entity|trader|name|title/i.test(h)
-  ) || headers.find((h) => !/address|county|eircode|postcode|phone|email|website/i.test(h)) || headers[0];
+  ) || headers[1] || headers[0];
 
   let countyKey = headers.find((h) =>
     /^(county|company_address_4|company_address_3|company_address_2|address\s*4|address4)$/i.test(h)
   ) || headers.find((h) =>
     /address\s*4|county|address4|company_address|location|region|city|town|area|district/i.test(h)
-  ) || headers.find((h) => h !== companyNumberKey && h !== companyNameKey) || headers[0];
+  ) || headers[2] || headers[headers.length - 1];
 
   const decisionMakerNameKey = headers.find((h) =>
     /decision\s*maker|ceo|executive|director|contact\s*name|owner|manager|key\s*person/i.test(h)
@@ -138,22 +119,20 @@ export function smartExtractAndHealRecords(
   let nameColNameCount = 0;
 
   sampleRows.forEach((row) => {
-    const valInNumberKey = companyNumberKey ? (row[companyNumberKey] || '').toString().trim() : '';
-    const valInNameKey = companyNameKey ? (row[companyNameKey] || '').toString().trim() : '';
+    const valInNumberKey = (row[companyNumberKey] || '').toString().trim();
+    const valInNameKey = (row[companyNameKey] || '').toString().trim();
 
-    if (valInNumberKey && isCompanyName(valInNumberKey)) numberColNameCount++;
-    if (valInNumberKey && isNumericCroNumber(valInNumberKey)) numberColDigitCount++;
+    if (isCompanyName(valInNumberKey)) numberColNameCount++;
+    if (isNumericCroNumber(valInNumberKey)) numberColDigitCount++;
 
-    if (valInNameKey && isNumericCroNumber(valInNameKey)) nameColDigitCount++;
-    if (valInNameKey && isCompanyName(valInNameKey)) nameColNameCount++;
+    if (isNumericCroNumber(valInNameKey)) nameColDigitCount++;
+    if (isCompanyName(valInNameKey)) nameColNameCount++;
   });
 
   // 3. Auto-Heal Header Swaps (e.g. "Company Number" contains names, "Company Name" contains numbers)
   if (
-    companyNumberKey &&
-    companyNameKey &&
-    companyNumberKey !== companyNameKey &&
-    (numberColNameCount > numberColDigitCount || nameColDigitCount > nameColNameCount)
+    (numberColNameCount > numberColDigitCount || nameColDigitCount > nameColNameCount) &&
+    companyNumberKey !== companyNameKey
   ) {
     const temp = companyNumberKey;
     companyNumberKey = companyNameKey;
@@ -167,8 +146,8 @@ export function smartExtractAndHealRecords(
   let rowLevelSwapsCount = 0;
 
   rows.forEach((row: any, index: number) => {
-    let companyName = companyNameKey ? (row[companyNameKey] || '').toString().trim() : '';
-    let companyNumber = companyNumberKey ? (row[companyNumberKey] || '').toString().trim() : '';
+    let companyName = (row[companyNameKey] || '').toString().trim();
+    let companyNumber = (row[companyNumberKey] || '').toString().trim();
     let countyRaw = (row[countyKey] || '').toString().trim();
     let county = extractIrishCountyFromText(
       countyRaw,
@@ -207,18 +186,15 @@ export function smartExtractAndHealRecords(
     if (companyName) {
       records.push({
         id: `record-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 7)}`,
-        companyNumber: companyNumber || getDedupKey(undefined, companyName, county),
+        companyNumber: companyNumber || `INC-${1000 + index}`,
         companyName,
         county,
-        eircode: extractEircodeFromRow(row),
         status: 'PENDING',
         official_website_url: null,
         decisionMakerName: dmName || null,
         decisionMakerRole: dmRole || null,
         confidence_score: 'NONE',
         match_type: 'UNPROCESSED',
-        rawRowData: row,
-        originalHeaders: Object.keys(row),
       });
     }
   });
@@ -310,8 +286,8 @@ export function analyzeColumnsContent(rows: any[], headers: string[]): ColumnAna
 
     // Also boost header keyword matches
     const hLower = header.toLowerCase();
-    let nameH = /name|company|business|firm|trader|entity/i.test(hLower) && !/address|county|eircode|postcode/i.test(hLower) ? 25 : 0;
-    let numH = (/cro|reg|kmt|number|id/i.test(hLower) || (/\bcode\b/i.test(hLower) && !/eircode|eir_code|postcode|postal/i.test(hLower))) ? 25 : 0;
+    let nameH = /name|company|business|firm|trader|entity/i.test(hLower) ? 25 : 0;
+    let numH = /cro|reg|kmt|number|id|code/i.test(hLower) ? 25 : 0;
     let countyH = /county|address|location|city|town/i.test(hLower) ? 25 : 0;
     let dmNameH = /decision\s*maker|ceo|contact|executive|director|person/i.test(hLower) ? 25 : 0;
     let dmRoleH = /role|title|position/i.test(hLower) ? 25 : 0;
@@ -425,10 +401,9 @@ export function extractRecordsWithCustomMapping(
     if (companyName) {
       records.push({
         id: `record-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 7)}`,
-        companyNumber: companyNumber || getDedupKey(undefined, companyName, county),
+        companyNumber: companyNumber || `INC-${1000 + index}`,
         companyName,
         county,
-        eircode: extractEircodeFromRow(row),
         status: 'PENDING',
         official_website_url: null,
         decisionMakerName: dmName || null,
@@ -448,54 +423,6 @@ export function extractRecordsWithCustomMapping(
   }
 
   return { records, autoCorrections };
-}
-
-/**
- * Merges the output of extractRecordsWithCustomMapping back onto an existing
- * dataset instead of replacing it wholesale. extractRecordsWithCustomMapping
- * only knows about the 5 fields the mapping modal exposes (name, CRO number,
- * county, decision-maker name/role) and builds brand-new CompanyRecord
- * objects — using its output directly as the new dataset would silently drop
- * every enrichment field (website, industry, phone, email, etc.) and mint a
- * fresh id per record. Correlates each relabeled record back to its source
- * via rawRowData.__recordId (attached by the caller before extraction) and
- * spreads the relabeled fields onto a copy of the original record.
- */
-export function mergeRelabeledRecords(
-  original: CompanyRecord[],
-  relabeledRecords: CompanyRecord[]
-): CompanyRecord[] {
-  const byId = new Map<string, CompanyRecord>(original.map((r) => [r.id, r]));
-  return relabeledRecords.map((nr) => {
-    const originalId = nr.rawRowData?.__recordId;
-    const match = originalId ? byId.get(originalId) : undefined;
-    if (!match) {
-      // No source record found — return the extracted record as-is, but strip
-      // the internal __recordId tracking key so it can never leak into a CSV
-      // export column via rawRowData.
-      if (nr.rawRowData && '__recordId' in nr.rawRowData) {
-        const { __recordId, ...rest } = nr.rawRowData;
-        return { ...nr, rawRowData: rest };
-      }
-      return nr;
-    }
-    const changed =
-      match.companyName !== nr.companyName ||
-      match.companyNumber !== nr.companyNumber ||
-      match.county !== nr.county ||
-      (match.decisionMakerName || null) !== (nr.decisionMakerName || null) ||
-      (match.decisionMakerRole || null) !== (nr.decisionMakerRole || null);
-    if (!changed) return match;
-    return {
-      ...match,
-      companyName: nr.companyName,
-      companyNumber: nr.companyNumber,
-      county: nr.county,
-      decisionMakerName: nr.decisionMakerName,
-      decisionMakerRole: nr.decisionMakerRole,
-      isManualEdit: true,
-    };
-  });
 }
 
 export function parseCSVFile(file: File): Promise<{ records: CompanyRecord[]; errors: string[]; autoCorrections: string[] }> {
@@ -602,10 +529,10 @@ export function exportRecordsToCSV(records: CompanyRecord[], filterProcessedOnly
     baseRow['match_type'] = r.match_type;
     baseRow['status'] = r.status;
     baseRow['notes'] = r.notes || '';
-    baseRow['decisionMakerName'] = cleanNullableField(r.decisionMakerName) || 'N/A';
-    baseRow['decisionMakerRole'] = cleanNullableField(r.decisionMakerRole) || 'N/A';
-    baseRow['phoneNumber'] = cleanNullableField(r.phoneNumber) || 'N/A';
-    baseRow['contactEmail'] = cleanNullableField(r.contactEmail) || 'N/A';
+    baseRow['decisionMakerName'] = r.decisionMakerName || 'N/A';
+    baseRow['decisionMakerRole'] = r.decisionMakerRole || 'N/A';
+    baseRow['phoneNumber'] = r.phoneNumber || 'N/A';
+    baseRow['contactEmail'] = r.contactEmail || 'N/A';
 
     return baseRow;
   });

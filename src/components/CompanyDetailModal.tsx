@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, ExternalLink, Copy, Check, Globe, ShieldCheck, AlertCircle, Search, Edit3, Save, MapPin, Hash, Sparkles, UserCheck, Linkedin } from 'lucide-react';
 import { CompanyRecord } from '../types';
-import { cleanNullableField } from '../utils/normalize';
 
 interface CompanyDetailModalProps {
   company: CompanyRecord | null;
@@ -9,23 +8,6 @@ interface CompanyDetailModalProps {
   onSaveManualUrl: (id: string, newUrl: string) => void;
   onReEnrichSingle: (company: CompanyRecord) => void;
   isReEnriching: boolean;
-}
-
-/**
- * Derives the display-ready contact/company fields for a record, cleaning
- * legacy literal "null" strings via cleanNullableField. Pure and
- * side-effect-free so it can be unit-tested directly without rendering
- * the modal.
- */
-export function getCleanedContactFields(company: CompanyRecord) {
-  return {
-    decisionMakerName: cleanNullableField(company.decisionMakerName),
-    decisionMakerRole: cleanNullableField(company.decisionMakerRole),
-    industry: cleanNullableField(company.industry),
-    companySummary: cleanNullableField(company.companySummary),
-    phoneNumber: cleanNullableField(company.phoneNumber),
-    contactEmail: cleanNullableField(company.contactEmail),
-  };
 }
 
 export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
@@ -40,15 +22,6 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editedUrl, setEditedUrl] = useState(company.official_website_url || '');
   const [copied, setCopied] = useState(false);
-
-  const {
-    decisionMakerName,
-    decisionMakerRole,
-    industry,
-    companySummary,
-    phoneNumber,
-    contactEmail,
-  } = getCleanedContactFields(company);
 
   const handleCopy = () => {
     if (company.official_website_url) {
@@ -149,21 +122,21 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
           </div>
 
           {/* Lead Research & Verification Cards */}
-          {(industry || companySummary || phoneNumber || contactEmail || decisionMakerName || company.linkedinUrl) && (
+          {(company.industry || company.companySummary || company.phoneNumber || company.contactEmail || company.decisionMakerName || company.linkedinUrl) && (
             <div className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-xl space-y-3">
               <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" /> B2B Lead Verification Intelligence
               </h4>
 
               <div className="grid grid-cols-2 gap-3 text-xs">
-                {decisionMakerName && (
+                {company.decisionMakerName && (
                   <div>
                     <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
                       <UserCheck className="w-3 h-3 text-emerald-600" /> Key Decision Maker
                     </span>
-                    <p className="font-bold text-slate-900 mt-0.5">{decisionMakerName}</p>
-                    {decisionMakerRole && (
-                      <p className="text-[11px] font-medium text-slate-600">{decisionMakerRole}</p>
+                    <p className="font-bold text-slate-900 mt-0.5">{company.decisionMakerName}</p>
+                    {company.decisionMakerRole && (
+                      <p className="text-[11px] font-medium text-slate-600">{company.decisionMakerRole}</p>
                     )}
                   </div>
                 )}
@@ -189,10 +162,10 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
                     <p className="text-xs italic text-slate-400 mt-0.5">Not Found</p>
                   </div>
                 )}
-                {industry && (
+                {company.industry && (
                   <div>
                     <span className="text-[10px] uppercase font-bold text-slate-500">Industry / Sector</span>
-                    <p className="font-semibold text-slate-800 mt-0.5">{industry}</p>
+                    <p className="font-semibold text-slate-800 mt-0.5">{company.industry}</p>
                   </div>
                 )}
                 {company.verificationStatus && (
@@ -201,24 +174,24 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
                     <p className="font-semibold text-emerald-700 mt-0.5">{company.verificationStatus}</p>
                   </div>
                 )}
-                {phoneNumber && (
+                {company.phoneNumber && (
                   <div>
                     <span className="text-[10px] uppercase font-bold text-slate-500">Public Phone</span>
-                    <p className="font-mono text-slate-800 mt-0.5">{phoneNumber}</p>
+                    <p className="font-mono text-slate-800 mt-0.5">{company.phoneNumber}</p>
                   </div>
                 )}
-                {contactEmail && (
+                {company.contactEmail && (
                   <div>
                     <span className="text-[10px] uppercase font-bold text-slate-500">Public Email</span>
-                    <p className="font-mono text-slate-800 mt-0.5 truncate">{contactEmail}</p>
+                    <p className="font-mono text-slate-800 mt-0.5 truncate">{company.contactEmail}</p>
                   </div>
                 )}
               </div>
 
-              {companySummary && (
+              {company.companySummary && (
                 <div className="pt-2 border-t border-emerald-200/60">
                   <span className="text-[10px] uppercase font-bold text-slate-500">Company Overview</span>
-                  <p className="text-xs text-slate-700 mt-0.5 leading-relaxed">{companySummary}</p>
+                  <p className="text-xs text-slate-700 mt-0.5 leading-relaxed">{company.companySummary}</p>
                 </div>
               )}
             </div>

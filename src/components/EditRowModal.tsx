@@ -1,48 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, ArrowLeftRight, CheckCircle2, Sparkles, Building2, MapPin, UserCheck, Globe, Phone, Mail, FileText } from 'lucide-react';
 import { CompanyRecord } from '../types';
-import { cleanNullableField } from '../utils/normalize';
 
 interface EditRowModalProps {
   isOpen: boolean;
   onClose: () => void;
   record: CompanyRecord | null;
   onSave: (updatedRecord: CompanyRecord) => void;
-}
-
-/**
- * Merges a record with its edited form data into a normalized CompanyRecord,
- * ready to save. Pure and side-effect-free so it can be unit-tested directly.
- * Uses cleanNullableField (not a bare `.trim() || null`) so that a field the
- * user left untouched — which may still carry a legacy literal "null" string
- * from before the enrichment-side fix — gets cleaned on every save, not only
- * when the user happens to retype that specific field.
- */
-export function normalizeEditedRecord(
-  record: CompanyRecord,
-  formData: Partial<CompanyRecord>
-): CompanyRecord {
-  const isFb = formData.official_website_url?.toLowerCase().includes('facebook.com');
-
-  return {
-    ...record,
-    ...formData,
-    companyName: (formData.companyName || '').trim(),
-    companyNumber: (formData.companyNumber || '').trim(),
-    county: (formData.county || 'Ireland').trim(),
-    official_website_url: formData.official_website_url?.trim() || null,
-    decisionMakerName: cleanNullableField(formData.decisionMakerName),
-    decisionMakerRole: cleanNullableField(formData.decisionMakerRole),
-    phoneNumber: cleanNullableField(formData.phoneNumber),
-    contactEmail: cleanNullableField(formData.contactEmail),
-    industry: cleanNullableField(formData.industry),
-    isManualEdit: true,
-    status: formData.official_website_url ? 'SUCCESS' : record.status,
-    match_type: formData.official_website_url
-      ? (isFb ? 'FACEBOOK_FALLBACK' : 'OFFICIAL_WEBSITE')
-      : record.match_type,
-    confidence_score: formData.official_website_url ? 'HIGH' : record.confidence_score,
-  };
 }
 
 export const EditRowModal: React.FC<EditRowModalProps> = ({
@@ -55,14 +19,7 @@ export const EditRowModal: React.FC<EditRowModalProps> = ({
 
   useEffect(() => {
     if (record) {
-      setFormData({
-        ...record,
-        decisionMakerName: cleanNullableField(record.decisionMakerName),
-        decisionMakerRole: cleanNullableField(record.decisionMakerRole),
-        phoneNumber: cleanNullableField(record.phoneNumber),
-        contactEmail: cleanNullableField(record.contactEmail),
-        industry: cleanNullableField(record.industry),
-      });
+      setFormData({ ...record });
     }
   }, [record]);
 
@@ -95,7 +52,29 @@ export const EditRowModal: React.FC<EditRowModalProps> = ({
       return;
     }
 
-    onSave(normalizeEditedRecord(record, formData));
+    const isFb = formData.official_website_url?.toLowerCase().includes('facebook.com');
+
+    const updated: CompanyRecord = {
+      ...record,
+      ...formData,
+      companyName: formData.companyName.trim(),
+      companyNumber: (formData.companyNumber || '').trim(),
+      county: (formData.county || 'Ireland').trim(),
+      official_website_url: formData.official_website_url?.trim() || null,
+      decisionMakerName: formData.decisionMakerName?.trim() || null,
+      decisionMakerRole: formData.decisionMakerRole?.trim() || null,
+      phoneNumber: formData.phoneNumber?.trim() || null,
+      contactEmail: formData.contactEmail?.trim() || null,
+      industry: formData.industry?.trim() || null,
+      isManualEdit: true,
+      status: formData.official_website_url ? 'SUCCESS' : record.status,
+      match_type: formData.official_website_url
+        ? (isFb ? 'FACEBOOK_FALLBACK' : 'OFFICIAL_WEBSITE')
+        : record.match_type,
+      confidence_score: formData.official_website_url ? 'HIGH' : record.confidence_score,
+    };
+
+    onSave(updated);
     onClose();
   };
 

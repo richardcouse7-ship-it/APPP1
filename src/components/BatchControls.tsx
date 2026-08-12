@@ -1,6 +1,5 @@
 import React from 'react';
-import { Play, Pause, RefreshCw, Sliders, CheckCircle, Shield, Layers, Clock, Zap, Save, Cpu, Database, Sparkles, DollarSign } from 'lucide-react';
-import { MODEL_PRICING, formatCost } from '../utils/modelPricing';
+import { Play, Pause, RefreshCw, Sliders, CheckCircle, Shield, Layers, Clock, Zap, Save, Cpu, Database, Sparkles } from 'lucide-react';
 
 interface BatchControlsProps {
   batchSize: number;
@@ -49,46 +48,41 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
   ];
 
   const modelOptions = [
-    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', speed: 'Ultra Fast', recommended: true },
-    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', speed: 'Fastest', recommended: false },
-    { id: 'perplexity-sonar', label: 'Perplexity Sonar', speed: 'Live Web Search', recommended: false },
-    { id: 'perplexity-sonar-pro', label: 'Perplexity Sonar Pro', speed: 'Deep Web Citation', recommended: false },
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', speed: 'Ultra Fast', cost: 'Low Cost (Recommended)' },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', speed: 'Fastest', cost: 'Maximum Economy' },
+    { id: 'perplexity-sonar', label: 'Perplexity Sonar', speed: 'Live Web Search', cost: 'Perplexity Search' },
+    { id: 'perplexity-sonar-pro', label: 'Perplexity Sonar Pro', speed: 'Deep Web Citation', cost: 'Advanced Perplexity' },
   ];
 
   const itemsToProcess = Math.min(batchSize, totalPending);
   const estimatedSeconds = Math.ceil(itemsToProcess * requestDelay);
 
-  const selectedModelRate = MODEL_PRICING[selectedModel];
-  const hasPricing = typeof selectedModelRate === 'number';
-  const estimatedBatchCost = hasPricing ? itemsToProcess * selectedModelRate : null;
-  const estimatedQueueCost = hasPricing ? totalPending * selectedModelRate : null;
-
   return (
-    <div className="bg-char rounded-2xl border border-char-light p-5 mb-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-3 mb-4 border-b border-char-light gap-3">
+    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs mb-6">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-3 mb-4 border-b border-slate-100 gap-3">
         <div>
-          <h2 className="font-display text-base font-semibold text-ash flex items-center gap-2">
-            <Sliders className="w-5 h-5 text-gold" />
+          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+            <Sliders className="w-5 h-5 text-emerald-600" />
             Batch Enrichment & Cost Optimizer Controls
           </h2>
-          <p className="text-xs text-smoke font-body mt-0.5">
+          <p className="text-xs text-slate-500 mt-0.5">
             Configure batch size, AI model engine, and request delay. Enable Smart Cache to reuse results and eliminate duplicate token spend.
           </p>
         </div>
 
         {/* Status badges */}
-        <div className="flex items-center space-x-2 flex-wrap gap-y-1 font-body">
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-void/60 text-gold border border-gold/30" title="State and settings are auto-saved to localStorage on every change">
-            <Save className="w-3.5 h-3.5 mr-1 text-gold" />
+        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200" title="State and settings are auto-saved to localStorage on every change">
+            <Save className="w-3.5 h-3.5 mr-1 text-emerald-600" />
             Auto-Save Active
           </span>
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-void/60 text-smoke border border-char-light">
-            <Layers className="w-3.5 h-3.5 mr-1 text-smoke" />
+          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+            <Layers className="w-3.5 h-3.5 mr-1 text-slate-500" />
             {totalPending} Remaining to Process
           </span>
           {totalProcessed > 0 && (
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-void/60 text-gold border border-gold/30">
-              <CheckCircle className="w-3.5 h-3.5 mr-1 text-gold" />
+            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <CheckCircle className="w-3.5 h-3.5 mr-1 text-emerald-600" />
               {totalProcessed} Already Processed
             </span>
           )}
@@ -97,12 +91,12 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: AI Engine Selector & Cache Setting */}
-        <div className="lg:col-span-7 space-y-4 font-body">
+        <div className="lg:col-span-7 space-y-4">
           {/* Row 1: Model Engine Selection */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-smoke uppercase tracking-wider flex items-center gap-1.5">
-                <Cpu className="w-3.5 h-3.5 text-gold" />
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 text-emerald-600" />
                 AI Model Engine:
               </label>
 
@@ -110,14 +104,14 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleCache(!useCache)}
-                className={`px-2.5 py-1 rounded-full text-xs font-bold border inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold border inline-flex items-center gap-1.5 transition-all cursor-pointer ${
                   useCache
-                    ? 'bg-gold/10 border-gold/40 text-gold'
-                    : 'bg-void/60 border-char-light text-smoke'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                    : 'bg-slate-50 border-slate-200 text-slate-500'
                 }`}
                 title="When active, previously researched companies load instantly with $0 API token cost"
               >
-                <Database className="w-3.5 h-3.5" />
+                <Database className="w-3.5 h-3.5 text-emerald-600" />
                 Smart Cache: {useCache ? 'ON (0 Token Reuse)' : 'OFF (Force Refetch)'}
               </button>
             </div>
@@ -133,19 +127,16 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
                     disabled={isRunning}
                     className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                       isActive
-                        ? 'bg-gradient-to-br from-ember to-gold text-void border-transparent shadow-lg shadow-ember/20'
-                        : 'bg-void/60 text-ash border-char-light hover:border-smoke/50'
+                        ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold">{opt.label}</span>
-                      {isActive && <Sparkles className="w-3.5 h-3.5" />}
+                      {isActive && <Sparkles className="w-3.5 h-3.5 text-amber-400" />}
                     </div>
-                    <div className={`text-[10px] mt-0.5 ${isActive ? 'text-void/80' : 'text-smoke'}`}>
-                      {opt.speed} •{' '}
-                      {typeof MODEL_PRICING[opt.id] === 'number'
-                        ? `${formatCost(MODEL_PRICING[opt.id])}/record${opt.recommended ? ' (Recommended)' : ''}`
-                        : 'Pricing TBD'}
+                    <div className={`text-[10px] mt-0.5 ${isActive ? 'text-emerald-200' : 'text-slate-500'}`}>
+                      {opt.speed} • {opt.cost}
                     </div>
                   </button>
                 );
@@ -154,11 +145,11 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
           </div>
 
           {/* Row 2: Batch Size */}
-          <div className="pt-2 border-t border-char-light space-y-2">
+          <div className="pt-2 border-t border-slate-100 space-y-2">
             <div className="flex items-center justify-between">
-              <label htmlFor="batch-slider" className="text-xs font-bold text-smoke uppercase tracking-wider flex items-center gap-1.5">
+              <label htmlFor="batch-slider" className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                 Batch Size:
-                <span className="text-xs font-extrabold text-gold bg-gold/10 px-2 py-0.5 rounded-full border border-gold/30 font-mono">
+                <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                   {batchSize} rows
                 </span>
               </label>
@@ -171,10 +162,10 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
                     type="button"
                     onClick={() => onBatchSizeChange(size)}
                     disabled={isRunning}
-                    className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                    className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
                       batchSize === size
-                        ? 'bg-ember text-void'
-                        : 'bg-void/60 text-smoke hover:text-ash'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
                     {size}
@@ -192,37 +183,26 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
               value={batchSize}
               onChange={(e) => onBatchSizeChange(parseInt(e.target.value, 10))}
               disabled={isRunning || totalPending === 0}
-              className="w-full h-2 bg-void rounded-full appearance-none cursor-pointer accent-ember disabled:opacity-50"
+              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 disabled:opacity-50"
             />
           </div>
 
           {/* Row 3: Request Delay / Rate Limit Pacing */}
-          <div className="pt-2 border-t border-char-light space-y-2">
+          <div className="pt-2 border-t border-slate-100 space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-xs font-bold text-smoke uppercase tracking-wider flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-gold" />
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-emerald-600" />
                 API Request Pacing / Delay:
-                <span className="text-xs font-extrabold text-gold bg-gold/10 px-2 py-0.5 rounded-full border border-gold/30 font-mono">
+                <span className="text-xs font-extrabold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                   {requestDelay}s
                 </span>
               </label>
 
               {/* Est Batch Time Indicator */}
               {itemsToProcess > 0 && (
-                <span className="text-[11px] font-semibold text-smoke bg-void/60 px-2 py-0.5 rounded-full border border-char-light flex items-center gap-1 font-mono">
-                  <Zap className="w-3 h-3 text-gold" />
+                <span className="text-[11px] font-semibold text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1">
+                  <Zap className="w-3 h-3 text-amber-500" />
                   Est. Runtime: ~{estimatedSeconds}s ({Math.round(60 / requestDelay)} req/min)
-                </span>
-              )}
-
-              {/* Est Cost Indicator */}
-              {itemsToProcess > 0 && estimatedBatchCost !== null && estimatedQueueCost !== null && (
-                <span
-                  className="text-[11px] font-semibold text-smoke bg-void/60 px-2 py-0.5 rounded-full border border-char-light flex items-center gap-1 font-mono"
-                  title={`Full queue: ${totalPending} records at ${formatCost(selectedModelRate as number)}/record`}
-                >
-                  <DollarSign className="w-3 h-3 text-gold" />
-                  Est. Cost: {formatCost(estimatedBatchCost)} this batch · {formatCost(estimatedQueueCost)} full queue
                 </span>
               )}
             </div>
@@ -237,46 +217,39 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
                     type="button"
                     onClick={() => onRequestDelayChange(preset.value)}
                     disabled={isRunning}
-                    className={`px-2 py-1.5 rounded-xl border text-center transition-all cursor-pointer ${
+                    className={`px-2 py-1.5 rounded-lg border text-center transition-all cursor-pointer ${
                       isActive
-                        ? 'bg-ember text-void border-ember font-bold'
-                        : 'bg-void/60 text-ash border-char-light hover:border-smoke/50'
+                        ? 'bg-emerald-600 text-white border-emerald-600 font-bold shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     }`}
                   >
                     <div className="text-xs font-bold">{preset.label}</div>
-                    <div className={`text-[9px] ${isActive ? 'text-void/70' : 'text-smoke'}`}>
+                    <div className={`text-[9px] ${isActive ? 'text-emerald-100' : 'text-slate-400'}`}>
                       {preset.tag}
                     </div>
                   </button>
                 );
               })}
             </div>
-
-            {useCache && itemsToProcess > 0 && estimatedBatchCost !== null && (
-              <div className="text-[10px] text-smoke flex items-center gap-1 pt-1">
-                <Shield className="w-3 h-3 text-gold shrink-0" />
-                <span>Excludes Smart Cache hits, which are free</span>
-              </div>
-            )}
           </div>
         </div>
 
         {/* Right Column: Run Batch Button & Dynamic Status */}
-        <div className="lg:col-span-5 flex flex-col justify-center space-y-2.5 pt-1 font-body">
+        <div className="lg:col-span-5 flex flex-col justify-center space-y-2.5 pt-1">
           {isRunning ? (
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={onStopBatch}
-                className="w-full inline-flex items-center justify-center px-5 py-3.5 text-sm font-bold text-void bg-gold hover:bg-gold/90 rounded-full transition-all gap-2 cursor-pointer"
+                className="w-full inline-flex items-center justify-center px-5 py-3.5 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-md transition-all gap-2 cursor-pointer"
               >
                 <Pause className="w-4 h-4 fill-current" />
                 Stop Batch Processing
               </button>
               {currentActiveRowName && (
-                <div className="flex items-center justify-center text-xs text-ash font-medium gap-1.5 bg-void/60 p-2 rounded-xl border border-char-light">
-                  <RefreshCw className="w-3.5 h-3.5 text-gold animate-spin shrink-0" />
-                  <span>Researching: <strong className="text-ash">{currentActiveRowName}</strong></span>
+                <div className="flex items-center justify-center text-xs text-slate-600 font-medium animate-pulse gap-1.5 bg-emerald-50/70 p-2 rounded-lg border border-emerald-200/60">
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-600 animate-spin shrink-0" />
+                  <span>Researching: <strong className="text-slate-800">{currentActiveRowName}</strong></span>
                 </div>
               )}
             </div>
@@ -285,13 +258,13 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
               type="button"
               onClick={onRunBatch}
               disabled={totalPending === 0 || totalRecords === 0}
-              className={`w-full inline-flex items-center justify-center px-6 py-4 text-sm font-bold rounded-full transition-all gap-2 ${
+              className={`w-full inline-flex items-center justify-center px-6 py-4 text-sm font-bold text-white rounded-xl shadow-md transition-all gap-2 ${
                 totalPending === 0 || totalRecords === 0
-                  ? 'bg-char-light text-smoke cursor-not-allowed'
-                  : 'bg-gradient-to-r from-ember to-gold text-void hover:shadow-lg hover:shadow-ember/30 active:scale-[0.99] cursor-pointer'
+                  ? 'bg-slate-300 cursor-not-allowed shadow-none'
+                  : 'bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg hover:shadow-emerald-900/20 active:scale-[0.99] cursor-pointer'
               }`}
             >
-              <Play className="w-4 h-4 fill-current" />
+              <Play className="w-4 h-4 fill-current text-white" />
               {totalPending === 0
                 ? 'All Companies Enriched!'
                 : `Run Batch Enrichment (${itemsToProcess} ${itemsToProcess === 1 ? 'row' : 'rows'})`}
@@ -299,8 +272,8 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
           )}
 
           {/* Sub-text explanation */}
-          <div className="text-[11px] text-smoke text-center flex items-center justify-center gap-1 pt-1">
-            <Shield className="w-3 h-3 text-gold shrink-0" />
+          <div className="text-[11px] text-slate-500 text-center flex items-center justify-center gap-1 pt-1">
+            <Shield className="w-3 h-3 text-emerald-600 shrink-0" />
             <span>Low-thinking configuration prevents quota limits & extra token costs</span>
           </div>
         </div>
@@ -308,3 +281,4 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
     </div>
   );
 };
+

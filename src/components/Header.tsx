@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Database, RefreshCw, Sparkles, LogOut, CheckCircle2, Save } from 'lucide-react';
+import { Search, ShieldCheck, Database, RefreshCw, Sparkles, Building2, LogOut, CheckCircle2, Save } from 'lucide-react';
 import { User } from 'firebase/auth';
 
 interface HeaderProps {
@@ -28,47 +28,46 @@ export const Header: React.FC<HeaderProps> = ({
   onLoadSample,
 }) => {
   return (
-    <header className="relative sticky top-0 z-30 bg-void/90 backdrop-blur-md border-b border-char-light/80 shadow-lg overflow-hidden">
-      {/* Ambient ember wave — signature motion in the UI */}
-      <div
-        className="absolute inset-0 opacity-20 animate-ember-wave pointer-events-none"
-        style={{
-          backgroundImage:
-            'linear-gradient(115deg, var(--color-ember) 0%, var(--color-gold) 25%, transparent 50%, var(--color-ember) 75%, var(--color-gold) 100%)',
-        }}
-      />
-
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-30 shadow-md">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          {/* Wordmark */}
-          <div className="flex items-center space-x-2.5">
-            <h1 className="font-display text-base sm:text-lg font-bold tracking-tight text-ash drop-shadow-sm">
-              Irish B2B Lead Enrichment
-            </h1>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-char/90 text-gold border border-gold/40 shadow-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
-              Live
-            </span>
-            <p className="hidden lg:flex items-center gap-1.5 text-xs text-smoke/90 font-body">
-              <Search className="w-3.5 h-3.5 text-ember" />
-              Website & B2B Lead Research
-            </p>
+          {/* Logo & Branding */}
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shadow-lg shadow-emerald-900/30 ring-1 ring-emerald-400/30">
+              <Building2 className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h1 className="text-lg font-bold tracking-tight text-white">
+                  Irish B2B Lead Enrichment
+                </h1>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Stage 1 & 2 Active
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
+                <Search className="w-3 h-3 text-emerald-400" />
+                Website & B2B Lead Research &bull; Google Drive & Sheets Sync
+              </p>
+            </div>
           </div>
 
-          {/* Right Action Bar */}
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Right Action Bar & Workspace OAuth */}
+          <div className="flex items-center space-x-2.5 flex-wrap">
+            {/* Google Drive / Sheets Auth Button */}
             {user ? (
-              <div className="flex items-center gap-2 bg-char/80 border border-char-light rounded-full pl-2 pr-1 py-1 text-xs text-ash font-body shadow-sm">
+              <div className="flex items-center space-x-2 bg-slate-800/90 border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-slate-200">
                 {user.photoURL ? (
-                  <img src={user.photoURL} alt={user.displayName || 'User'} className="w-5 h-5 rounded-full ring-1 ring-gold/50" />
+                  <img src={user.photoURL} alt={user.displayName || 'User'} className="w-5 h-5 rounded-full ring-1 ring-emerald-400" />
                 ) : (
-                  <CheckCircle2 className="w-4 h-4 text-gold" />
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 )}
-                <span className="font-medium max-w-[120px] truncate">{user.displayName || user.email}</span>
+                <span className="font-medium text-emerald-300 max-w-[120px] truncate">{user.displayName || user.email}</span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 font-semibold">Drive Connected</span>
                 <button
                   onClick={onGoogleSignOut}
                   title="Sign out of Google"
-                  className="p-1.5 hover:text-ember text-smoke rounded-full transition-colors cursor-pointer hover:bg-char-light/50"
+                  className="p-1 hover:text-red-400 text-slate-400 rounded transition-colors"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
@@ -77,7 +76,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={onGoogleSignIn}
                 disabled={isLoggingIn}
-                className="inline-flex items-center px-3.5 py-1.5 text-xs font-semibold rounded-full bg-ash text-void hover:bg-white hover:shadow-md active:scale-95 transition-all cursor-pointer font-body"
+                className="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-lg bg-white text-slate-800 hover:bg-slate-100 transition-colors shadow-sm ring-1 ring-slate-300"
               >
                 <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -89,45 +88,47 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Auto-Save Badge */}
+            {/* Auto-Save Persistence Badge */}
             <div
-              className="hidden md:inline-flex items-center px-3 py-1 rounded-full text-[11px] font-medium font-body bg-char/80 text-smoke border border-char-light/80 shadow-sm"
+              className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"
               title={lastSavedAt ? `Auto-saved to localStorage at ${lastSavedAt}` : 'Auto-save active'}
             >
-              <Save className="w-3 h-3 mr-1.5 text-gold" />
-              Auto-Saved
-              {lastSavedAt && <span className="ml-1.5 font-mono text-[10px] text-smoke/90">{lastSavedAt}</span>}
+              <Save className="w-3 h-3 mr-1 text-emerald-400" />
+              <span className="hidden md:inline">Auto-Saved</span>
+              {lastSavedAt && <span className="ml-1 font-mono text-[10px] text-emerald-400/90">{lastSavedAt}</span>}
             </div>
 
             {/* API Key Status Badge */}
             <div
-              className={`inline-flex items-center px-3 py-1 rounded-full text-[11px] font-medium font-body border shadow-sm ${
-                hasApiKey ? 'bg-char/90 text-gold border-gold/30' : 'bg-char/90 text-ember border-ember/40'
+              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
+                hasApiKey
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80'
+                  : 'bg-amber-950/80 text-amber-300 border-amber-800/80'
               }`}
               title={hasApiKey ? 'Gemini API Connected with Google Search Grounding' : 'Checking Gemini API...'}
             >
-              <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${hasApiKey ? 'bg-gold animate-pulse' : 'bg-ember'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${hasApiKey ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
               <Sparkles className="w-3 h-3 mr-1" />
               {hasApiKey ? 'Grounding Ready' : 'API Connecting...'}
             </div>
 
-            {/* Load Sample */}
+            {/* Load Sample Button */}
             <button
               onClick={onLoadSample}
-              className="inline-flex items-center px-3.5 py-1.5 text-xs font-semibold font-body rounded-full text-ash bg-char/80 hover:bg-char border border-char-light/80 hover:border-gold/30 active:scale-95 transition-all cursor-pointer shadow-sm"
+              className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors shadow-sm"
             >
-              <Database className="w-3.5 h-3.5 mr-1.5 text-gold" />
+              <Database className="w-3.5 h-3.5 mr-1.5 text-teal-400" />
               Sample Data
             </button>
 
-            {/* Reset */}
+            {/* Clear/Reset Button */}
             {totalRecords > 0 && (
               <button
                 onClick={onReset}
-                className="inline-flex items-center px-3.5 py-1.5 text-xs font-semibold font-body rounded-full text-smoke hover:text-ash bg-char/50 hover:bg-char border border-char-light/60 hover:border-ember/30 active:scale-95 transition-all cursor-pointer shadow-sm"
+                className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 transition-colors"
                 title="Reset session & clear list"
               >
-                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
                 Reset
               </button>
             )}
@@ -137,3 +138,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+

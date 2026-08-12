@@ -15,8 +15,6 @@ import { GoogleMapsGroundingModal } from './components/GoogleMapsGroundingModal'
 import { CompanyRecord, SummaryStats } from './types';
 import { SAMPLE_IRISH_COMPANIES } from './data/sampleCompanies';
 import { analyzeDuplicates, deduplicateDataset } from './utils/duplicateUtils';
-import { cleanNullableField } from './utils/normalize';
-import { mergeRelabeledRecords } from './utils/csvUtils';
 import { Sparkles, Building2, ShieldCheck, Database, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Mic, MapPin, Brain, ArrowRight, Layers } from 'lucide-react';
 import { initAuth, googleSignIn, logoutUser } from './lib/firebaseAuth';
 import {
@@ -31,9 +29,6 @@ import {
   clearAllStagedLeadsFromFirestore
 } from './lib/firestoreDb';
 import { User } from 'firebase/auth';
-import { apiFetch } from './lib/apiClient';
-import { useBatchSettings } from './hooks/useBatchSettings';
-import { useDeletedRecords } from './hooks/useDeletedRecords';
 
 const STORAGE_KEY = 'irish_b2b_website_finder_records_v1';
 const STAGED_VAULT_KEY = 'irish_b2b_staged_leads_vault_v1';
@@ -51,8 +46,19 @@ export default function App() {
   // Active view tab in UI: 'FINAL_TABLE' | 'STAGING_VAULT'
   const [activeTab, setActiveTab] = useState<'FINAL_TABLE' | 'STAGING_VAULT'>('FINAL_TABLE');
 
-  // Tombstone list of deleted record IDs — managed by useDeletedRecords hook
-  const { deletedRecordIds, addDeletedIds, clearDeletedIds, setAllDeletedIds } = useDeletedRecords();
+  // Tombstone list of deleted record IDs to prevent resurrection on refresh / Firestore sync
+  const [deletedRecordIds, setDeletedRecordIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(DELETED_IDS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return new Set(parsed);
+      }
+    } catch (e) {
+      console.error('Failed to load deleted record IDs', e);
+    }
+    return new Set();
+  });
 
   // Load Tier 1 Staged Leads Vault from localStorage
   const [stagedLeads, setStagedLeads] = useState<CompanyRecord[]>(() => {
@@ -60,11 +66,7 @@ export default function App() {
       const saved = localStorage.getItem(STAGED_VAULT_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          const savedDeleted = localStorage.getItem(DELETED_IDS_KEY);
-          const deletedSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : new Set();
-          return parsed.filter((l: CompanyRecord) => !deletedSet.has(l.id));
-        }
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (e) {
       console.error('Failed to load staged leads from localStorage', e);
@@ -95,14 +97,40 @@ export default function App() {
     return SAMPLE_IRISH_COMPANIES;
   });
 
-  // Batch settings — managed by useBatchSettings hook
-  const {
-    batchSize, setBatchSize,
-    requestDelay, setRequestDelay,
-    selectedModel, setSelectedModel,
-    useCache, setUseCache,
-    resetSettings,
-  } = useBatchSettings();
+  // Load saved batch settings from localStorage
+  const [batchSize, setBatchSize] = useState<number>(() => {
+    try {
+      const savedSettings = localStorage.getItem(SETTINGS_KEY);
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        if (typeof parsed.batchSize === 'number' && parsed.batchSize >= 1 && parsed.batchSize <= 50) {
+          return parsed.batchSize;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load batchSize setting from localStorage', e);
+    }
+    return 10;
+  });
+
+  const [requestDelay, setRequestDelay] = useState<number>(() => {
+    try {
+      const savedSettings = localStorage.getItem(SETTINGS_KEY);
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        if (typeof parsed.requestDelay === 'number' && parsed.requestDelay >= 0.1 && parsed.requestDelay <= 10) {
+          return parsed.requestDelay;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load requestDelay setting from localStorage', e);
+    }
+    return 1.2;
+  });
+
+  // AI Model Engine & Cost Optimization Settings
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
+  const [useCache, setUseCache] = useState<boolean>(true);
 
   const [isRunningBatch, setIsRunningBatch] = useState<boolean>(false);
   const [currentActiveCompany, setCurrentActiveCompany] = useState<CompanyRecord | null>(null);
@@ -111,31 +139,11 @@ export default function App() {
   const [isReEnrichingSingle, setIsReEnrichingSingle] = useState<boolean>(false);
   const [rateLimitNotice, setRateLimitNotice] = useState<string | null>(null);
   const stopBatchRef = useRef<boolean>(false);
-  const activeAbortControllerRef = useRef<AbortController | null>(null);
 
   // Google Workspace Auth State
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
-
-  // Helper to merge local state and remote Firestore datasets without losing data
-  const mergeRecordsList = (local: CompanyRecord[], remote: CompanyRecord[], deletedIds: Set<string>): CompanyRecord[] => {
-    const map = new Map<string, CompanyRecord>();
-    local.forEach((r) => {
-      if (!deletedIds.has(r.id)) map.set(r.id, r);
-    });
-    remote.forEach((r) => {
-      if (!deletedIds.has(r.id)) {
-        const existing = map.get(r.id);
-        if (!existing) {
-          map.set(r.id, r);
-        } else if (r.status === 'SUCCESS' && existing.status !== 'SUCCESS') {
-          map.set(r.id, r);
-        }
-      }
-    });
-    return Array.from(map.values());
-  };
 
   useEffect(() => {
     // Test connection mandate
@@ -146,16 +154,18 @@ export default function App() {
         setUser(currentUser);
         setAccessToken(token);
 
-        // Safely merge saved datasets from Firestore when user logs in
+        // Load saved datasets from Firestore when user logs in
         if (currentUser) {
           try {
             const firestoreRecords = await getUserRecordsFromFirestore(currentUser.uid);
             if (firestoreRecords && firestoreRecords.length > 0) {
-              setRecords((prev) => mergeRecordsList(prev, firestoreRecords, deletedRecordIds));
+              // Filter out tombstoned deleted IDs
+              const validRecords = firestoreRecords.filter((r) => !deletedRecordIds.has(r.id));
+              setRecords(validRecords);
             }
             const firestoreStaged = await getStagedLeadsFromFirestore(currentUser.uid);
             if (firestoreStaged && firestoreStaged.length > 0) {
-              setStagedLeads((prev) => mergeRecordsList(prev, firestoreStaged, deletedRecordIds));
+              setStagedLeads(firestoreStaged);
             }
           } catch (e) {
             console.warn('Could not load Firestore records:', e);
@@ -178,17 +188,18 @@ export default function App() {
         setUser(result.user);
         setAccessToken(result.accessToken);
 
-        // Sync and merge Firestore records upon sign in
+        // Sync Firestore records upon sign in
         try {
           const firestoreRecords = await getUserRecordsFromFirestore(result.user.uid);
           if (firestoreRecords && firestoreRecords.length > 0) {
-            setRecords((prev) => mergeRecordsList(prev, firestoreRecords, deletedRecordIds));
+            const validRecords = firestoreRecords.filter((r) => !deletedRecordIds.has(r.id));
+            setRecords(validRecords);
           } else if (records.length > 0) {
             await saveUserRecordsToFirestore(result.user.uid, records);
           }
           const firestoreStaged = await getStagedLeadsFromFirestore(result.user.uid);
           if (firestoreStaged && firestoreStaged.length > 0) {
-            setStagedLeads((prev) => mergeRecordsList(prev, firestoreStaged, deletedRecordIds));
+            setStagedLeads(firestoreStaged);
           } else if (stagedLeads.length > 0) {
             await saveStagedLeadsToFirestore(result.user.uid, stagedLeads);
           }
@@ -198,11 +209,6 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Google Sign-In failed:', err);
-      if (err?.code !== 'auth/popup-closed-by-user') {
-        setRateLimitNotice(
-          `Google Sign-In error (${err.code || 'origin_mismatch'}): Ensure http://localhost:3000 is added to Authorized JavaScript Origins in Google Cloud Console.`
-        );
-      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -214,33 +220,38 @@ export default function App() {
     setAccessToken(null);
   };
 
-  // Auto-save records and staged leads to localStorage immediately, debouncing Firestore writes by 1.5s
+  // Auto-save records and staged leads to localStorage and Firestore
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
       localStorage.setItem(STAGED_VAULT_KEY, JSON.stringify(stagedLeads));
+      localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(Array.from(deletedRecordIds)));
 
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastSavedAt(timeStr);
+
+      if (user) {
+        saveUserRecordsToFirestore(user.uid, records).catch((e) =>
+          console.warn('Background Firestore sync warning:', e)
+        );
+        saveStagedLeadsToFirestore(user.uid, stagedLeads).catch((e) =>
+          console.warn('Background Firestore staged sync warning:', e)
+        );
+      }
     } catch (e) {
-      console.error('Failed to auto-save records to localStorage', e);
+      console.error('Failed to auto-save records', e);
     }
+  }, [records, stagedLeads, deletedRecordIds, user]);
 
-    if (!user) return;
-
-    // Debounce Firestore background sync to prevent write quota exhaustion during rapid batch enrichment
-    const timer = setTimeout(() => {
-      saveUserRecordsToFirestore(user.uid, records).catch((e) =>
-        console.warn('Background Firestore sync warning:', e)
-      );
-      saveStagedLeadsToFirestore(user.uid, stagedLeads).catch((e) =>
-        console.warn('Background Firestore staged sync warning:', e)
-      );
-    }, 1500);
-
-    return () => clearTimeout(timer);
-  }, [records, stagedLeads, user]);
+  // Auto-save batch settings (batchSize, requestDelay) to localStorage on every setting change
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ batchSize, requestDelay }));
+    } catch (e) {
+      console.error('Failed to auto-save batch settings to localStorage', e);
+    }
+  }, [batchSize, requestDelay]);
 
   // Check health status on mount
   useEffect(() => {
@@ -325,7 +336,7 @@ export default function App() {
   };
 
   // Promote & bring through staged leads into Final Enriched Results Data Table (Tier 2)
-  const handlePromoteAndEnrichStagedLeads = (leadsToPromote: CompanyRecord[], switchTab: boolean = true) => {
+  const handlePromoteAndEnrichStagedLeads = (leadsToPromote: CompanyRecord[]) => {
     if (!leadsToPromote || leadsToPromote.length === 0) return;
 
     const promoteIds = new Set(leadsToPromote.map((l) => l.id));
@@ -339,9 +350,7 @@ export default function App() {
 
     // Remove promoted leads from Staging Vault
     setStagedLeads((prev) => prev.filter((l) => !promoteIds.has(l.id)));
-    if (switchTab) {
-      setActiveTab('FINAL_TABLE');
-    }
+    setActiveTab('FINAL_TABLE');
 
     if (user) {
       deleteStagedLeadsFromFirestore(user.uid, Array.from(promoteIds)).catch((e) =>
@@ -373,16 +382,6 @@ export default function App() {
     }
   };
 
-  const handleResetDisqualifiedStagedLeads = () => {
-    setStagedLeads((prev) =>
-      prev.map((l) =>
-        l.match_type === 'DISQUALIFIED'
-          ? { ...l, status: 'PENDING', match_type: 'UNPROCESSED', notes: undefined }
-          : l
-      )
-    );
-  };
-
   // Auto clean deduplicate handler
   const handleAutoDeduplicate = () => {
     const { cleanedRecords } = deduplicateDataset(records);
@@ -393,7 +392,11 @@ export default function App() {
     setIsDuplicateBannerDismissed(true);
 
     if (removedIds.length > 0) {
-      addDeletedIds(removedIds);
+      setDeletedRecordIds((prev) => {
+        const next = new Set([...prev, ...removedIds]);
+        localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(Array.from(next)));
+        return next;
+      });
       if (user) {
         deleteUserRecordsFromFirestore(user.uid, removedIds).catch((e) =>
           console.warn('Firestore delete error:', e)
@@ -418,7 +421,11 @@ export default function App() {
     );
 
     if (removedIds.length > 0) {
-      addDeletedIds(removedIds);
+      setDeletedRecordIds((prev) => {
+        const next = new Set([...prev, ...removedIds]);
+        localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(Array.from(next)));
+        return next;
+      });
       if (user) {
         deleteUserRecordsFromFirestore(user.uid, removedIds).catch((e) =>
           console.warn('Firestore delete error:', e)
@@ -433,10 +440,13 @@ export default function App() {
       const allIds = records.map((r) => r.id);
       setRecords([]);
       setStagedLeads([]);
-      setAllDeletedIds(allIds);
+      setDeletedRecordIds(new Set(allIds));
       localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
       localStorage.setItem(STAGED_VAULT_KEY, JSON.stringify([]));
-      resetSettings();
+      localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(allIds));
+      localStorage.removeItem(SETTINGS_KEY);
+      setBatchSize(10);
+      setRequestDelay(1.2);
 
       if (user) {
         clearAllUserRecordsFromFirestore(user.uid).catch((e) =>
@@ -457,7 +467,9 @@ export default function App() {
     setRecords((prev) => prev.filter((r) => !idsToDelete.includes(r.id)));
 
     // 2. Mark in Tombstone deleted list so reload/refresh never resurrects them
-    addDeletedIds(idsToDelete);
+    const newDeletedIds = new Set([...deletedRecordIds, ...idsToDelete]);
+    setDeletedRecordIds(newDeletedIds);
+    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(Array.from(newDeletedIds)));
 
     // 3. Immediately purge from local storage
     const updatedRecords = records.filter((r) => !idsToDelete.includes(r.id));
@@ -532,8 +544,9 @@ export default function App() {
     );
 
     try {
-      const res = await apiFetch('/api/enrich-single', {
+      const res = await fetch('/api/enrich-single', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: company.id,
           companyName: company.companyName,
@@ -587,28 +600,24 @@ export default function App() {
     }
   };
 
-  // Run Batch Enrichment (Tier 2 full research) or Light Sweep (Tier 1 fast match),
-  // sharing the same pacing/429-pause/cancellation infrastructure.
-  const runBatchEnrichment = async (tier: 'STAGED' | 'FINAL' = 'FINAL') => {
+  // Run Batch Enrichment process with pacing delay and rate limit resilience
+  const runBatchEnrichment = async () => {
     if (isRunningBatch) return;
 
     setRateLimitNotice(null);
 
-    const mode: 'LIGHT_SWEEP' | 'FULL_ENRICHMENT' = tier === 'STAGED' ? 'LIGHT_SWEEP' : 'FULL_ENRICHMENT';
-    const sourceList = tier === 'STAGED' ? stagedLeads : records;
-    const pendingRecords = sourceList.filter((r) => r.status === 'PENDING');
+    // If active tab is staging vault or no pending in records, auto-promote staged leads first!
+    if (stagedLeads.length > 0 && records.filter((r) => r.status === 'PENDING').length === 0) {
+      handlePromoteAndEnrichStagedLeads(stagedLeads);
+    }
+
+    // Filter strictly PENDING records (deduplication guarantee)
+    const pendingRecords = records.filter((r) => r.status === 'PENDING');
     if (pendingRecords.length === 0) return;
 
-    const sweepBatchLimit = mode === 'LIGHT_SWEEP' ? Math.min(pendingRecords.length, 50) : batchSize;
-    const itemsToProcess = pendingRecords.slice(0, sweepBatchLimit);
+    const itemsToProcess = pendingRecords.slice(0, batchSize);
     setIsRunningBatch(true);
     stopBatchRef.current = false;
-
-    // Apex domains already present in Tier 2, seeded before the run so a Light Sweep
-    // catches shared-domain matches against earlier sweep runs, not just this one.
-    const seenApexDomains = new Set<string>(
-      records.filter((r) => r.apexDomain).map((r) => r.apexDomain as string)
-    );
 
     for (let i = 0; i < itemsToProcess.length; i++) {
       if (stopBatchRef.current) break;
@@ -616,46 +625,28 @@ export default function App() {
       const targetItem = itemsToProcess[i];
       setCurrentActiveCompany(targetItem);
 
-      const applyToSourceTier = (updater: (prev: CompanyRecord[]) => CompanyRecord[]) => {
-        if (tier === 'STAGED') setStagedLeads(updater);
-        else setRecords(updater);
-      };
-
       // Mark row as processing in UI
-      applyToSourceTier((prev) =>
+      setRecords((prev) =>
         prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PROCESSING' } : r))
       );
 
-      const controller = new AbortController();
-      activeAbortControllerRef.current = controller;
-
-      const timeoutId = setTimeout(() => {
-        controller.abort('TIMEOUT');
-      }, 22000);
-
       try {
-        const res = await apiFetch('/api/enrich-single', {
+        const res = await fetch('/api/enrich-single', {
           method: 'POST',
-          signal: controller.signal,
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: targetItem.id,
             companyName: targetItem.companyName,
             county: targetItem.county,
             companyNumber: targetItem.companyNumber,
-            eircode: targetItem.eircode,
-            rawRowData: targetItem.rawRowData,
             modelName: selectedModel,
             forceRefresh: !useCache,
-            mode,
           }),
         });
 
-        clearTimeout(timeoutId);
-        activeAbortControllerRef.current = null;
-
         if (res.status === 429) {
           setRateLimitNotice('Gemini API rate limit reached. Pausing batch to let quota refresh. You can click "Run Batch Enrichment" again in a few seconds.');
-          applyToSourceTier((prev) =>
+          setRecords((prev) =>
             prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PENDING' } : r))
           );
           break;
@@ -665,7 +656,7 @@ export default function App() {
           const errData = await res.json().catch(() => ({}));
           if (errData.error?.includes('rate limit') || errData.error?.includes('quota')) {
             setRateLimitNotice('Gemini API rate limit reached. Pausing batch to let quota refresh.');
-            applyToSourceTier((prev) =>
+            setRecords((prev) =>
               prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PENDING' } : r))
             );
             break;
@@ -675,107 +666,35 @@ export default function App() {
 
         const data = await res.json();
 
-        if (tier === 'STAGED') {
-          const isTradingOrMatched = data.tradingStatus === 'TRADING' || Boolean(data.official_website_url);
-
-          if (isTradingOrMatched) {
-            const apexDomain: string | null = data.apexDomain || null;
-            const isSharedDomain = apexDomain !== null && seenApexDomains.has(apexDomain);
-            if (apexDomain) seenApexDomains.add(apexDomain);
-
-            const promotedRecord: CompanyRecord = {
-              ...targetItem,
-              status: 'SUCCESS',
-              official_website_url: data.official_website_url || null,
-              tradingStatus: data.tradingStatus || 'TRADING',
-              category: data.category || null,
-              phoneNumber: data.phoneNumber || null,
-              apexDomain,
-              confidence_score: data.official_website_url ? 'HIGH' : 'MEDIUM',
-              match_type: isSharedDomain ? 'SHARED_DOMAIN' : 'LIGHT_SWEEP_COMPLETE',
-              notes: data.notes || (data.official_website_url ? 'Verified trading with official website via Light Sweep.' : 'Confirmed active trading business; website pending Tier 2 full enrichment.'),
-              processedAt: new Date().toISOString(),
-            };
-            handlePromoteAndEnrichStagedLeads([promotedRecord], false);
-          } else {
-            setStagedLeads((prev) =>
-              prev.map((r) =>
-                r.id === targetItem.id
-                  ? {
-                      ...r,
-                      status: 'SUCCESS',
-                      tradingStatus: data.tradingStatus || 'NOT_FOUND',
-                      category: data.category || null,
-                      phoneNumber: data.phoneNumber || null,
-                      match_type: 'DISQUALIFIED',
-                      notes: data.notes || 'Light Sweep found no evidence of active trading.',
-                      processedAt: new Date().toISOString(),
-                    }
-                  : r
-              )
-            );
-          }
-        } else {
-          setRecords((prev) =>
-            prev.map((r) => {
-              if (r.id === targetItem.id) {
-                return {
-                  ...r,
-                  status: 'SUCCESS',
-                  official_website_url: data.official_website_url,
-                  apexDomain: data.apexDomain,
-                  industry: data.industry,
-                  companySummary: data.companySummary,
-                  decisionMakerName: data.decisionMakerName,
-                  decisionMakerRole: data.decisionMakerRole,
-                  linkedinUrl: data.linkedinUrl,
-                  linkedinType: data.linkedinType,
-                  phoneNumber: data.phoneNumber,
-                  contactEmail: data.contactEmail,
-                  verificationStatus: data.verificationStatus,
-                  confidence_score: data.confidence_score,
-                  match_type: data.match_type,
-                  notes: data.notes,
-                  grounding_sources: data.grounding_sources,
-                  processedAt: new Date().toISOString(),
-                };
-              }
-              return r;
-            })
-          );
-        }
+        setRecords((prev) =>
+          prev.map((r) => {
+            if (r.id === targetItem.id) {
+              return {
+                ...r,
+                status: 'SUCCESS',
+                official_website_url: data.official_website_url,
+                industry: data.industry,
+                companySummary: data.companySummary,
+                decisionMakerName: data.decisionMakerName,
+                decisionMakerRole: data.decisionMakerRole,
+                linkedinUrl: data.linkedinUrl,
+                linkedinType: data.linkedinType,
+                phoneNumber: data.phoneNumber,
+                contactEmail: data.contactEmail,
+                verificationStatus: data.verificationStatus,
+                confidence_score: data.confidence_score,
+                match_type: data.match_type,
+                notes: data.notes,
+                grounding_sources: data.grounding_sources,
+                processedAt: new Date().toISOString(),
+              };
+            }
+            return r;
+          })
+        );
       } catch (err: any) {
-        clearTimeout(timeoutId);
-        activeAbortControllerRef.current = null;
-
-        if (err.name === 'AbortError' || err === 'TIMEOUT') {
-          if (stopBatchRef.current) {
-            applyToSourceTier((prev) =>
-              prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PENDING' } : r))
-            );
-            break;
-          } else {
-            console.warn(`Enrichment request timed out for ${targetItem.companyName}`);
-            applyToSourceTier((prev) =>
-              prev.map((r) =>
-                r.id === targetItem.id
-                  ? {
-                      ...r,
-                      status: 'FAILED',
-                      official_website_url: null,
-                      confidence_score: 'LOW',
-                      match_type: tier === 'STAGED' ? 'DISQUALIFIED' : 'NOT_FOUND',
-                      notes: 'Enrichment request timed out after 22 seconds.',
-                    }
-                  : r
-              )
-            );
-            continue;
-          }
-        }
-
         console.error(`Error enriching ${targetItem.companyName}:`, err);
-        applyToSourceTier((prev) =>
+        setRecords((prev) =>
           prev.map((r) =>
             r.id === targetItem.id
               ? {
@@ -783,7 +702,7 @@ export default function App() {
                   status: 'FAILED',
                   official_website_url: null,
                   confidence_score: 'LOW',
-                  match_type: tier === 'STAGED' ? 'DISQUALIFIED' : 'NOT_FOUND',
+                  match_type: 'NOT_FOUND',
                   notes: `Enrichment error: ${err.message}`,
                 }
               : r
@@ -802,16 +721,10 @@ export default function App() {
 
   const handleStopBatch = () => {
     stopBatchRef.current = true;
-    if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort();
-      activeAbortControllerRef.current = null;
-    }
-    setIsRunningBatch(false);
-    setCurrentActiveCompany(null);
   };
 
   return (
-    <div className="min-h-screen bg-void text-ash font-body antialiased selection:bg-ember selection:text-void">
+    <div className="min-h-screen bg-slate-100/70 text-slate-900 font-sans antialiased selection:bg-emerald-500 selection:text-white">
       {/* Header */}
       <Header
         hasApiKey={hasApiKey}
@@ -832,16 +745,16 @@ export default function App() {
         <StatsCards stats={stats} />
 
         {/* Gemini Intelligence Suite Toolbar */}
-        <div className="bg-char border border-char-light rounded-2xl p-4 text-ash flex flex-col md:flex-row items-center justify-between gap-4 font-body">
+        <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 border border-emerald-800/60 rounded-2xl p-4 shadow-lg text-white flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-void/60 border border-char-light rounded-xl">
-              <Sparkles className="w-5 h-5 text-gold" />
+            <div className="p-2.5 bg-emerald-500/20 border border-emerald-400/30 rounded-xl">
+              <Sparkles className="w-5 h-5 text-emerald-300" />
             </div>
             <div>
-              <h3 className="font-display text-sm font-semibold text-ash flex items-center gap-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 Gemini Intelligence & Grounding Suite
               </h3>
-              <p className="text-xs text-smoke">
+              <p className="text-xs text-slate-300">
                 Voice Assistant &bull; Google Maps Geographic Search &bull; AI Lead Strategy & Outreach
               </p>
             </div>
@@ -850,23 +763,23 @@ export default function App() {
           <div className="flex items-center gap-2.5 flex-wrap">
             <button
               onClick={() => setIsVoiceModalOpen(true)}
-              className="inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-full bg-void/60 hover:bg-void border border-char-light text-ash transition-all cursor-pointer gap-1.5"
+              className="inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all cursor-pointer gap-1.5"
             >
-              <Mic className="w-4 h-4 text-gold" />
+              <Mic className="w-4 h-4" />
               Voice Assistant
             </button>
 
             <button
               onClick={() => setIsAiModalOpen(true)}
-              className="inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-full bg-void/60 hover:bg-void border border-char-light text-ash transition-all cursor-pointer gap-1.5"
+              className="inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition-all cursor-pointer gap-1.5"
             >
-              <Brain className="w-4 h-4 text-gold" />
+              <Brain className="w-4 h-4" />
               Lead Strategy & Scoring
             </button>
 
             <button
               onClick={() => setIsMapsModalOpen(true)}
-              className="inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-full bg-gradient-to-r from-ember to-gold text-void transition-all cursor-pointer gap-1.5"
+              className="inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-xl bg-teal-700 hover:bg-teal-600 text-white shadow-sm transition-all cursor-pointer gap-1.5"
             >
               <MapPin className="w-4 h-4" />
               Google Maps Search
@@ -896,17 +809,17 @@ export default function App() {
 
         {/* Rate Limit Notice Banner */}
         {rateLimitNotice && (
-          <div className="bg-ember/10 border border-ember/30 rounded-xl p-4 flex items-start justify-between text-ash text-xs animate-in fade-in font-body">
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start justify-between text-amber-900 text-xs shadow-xs animate-in fade-in">
             <div className="flex items-center space-x-2.5">
-              <AlertTriangle className="w-5 h-5 text-ember shrink-0" />
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
               <div>
-                <span className="font-bold text-ash">Batch Processing Paused</span>
-                <p className="text-smoke mt-0.5">{rateLimitNotice}</p>
+                <span className="font-bold text-amber-900">Batch Processing Paused</span>
+                <p className="text-amber-800 mt-0.5">{rateLimitNotice}</p>
               </div>
             </div>
             <button
               onClick={() => setRateLimitNotice(null)}
-              className="p-1 text-ember hover:text-ash rounded-full hover:bg-ember/10"
+              className="p-1 text-amber-600 hover:text-amber-900 rounded-md hover:bg-amber-100"
             >
               <X className="w-4 h-4" />
             </button>
@@ -923,7 +836,7 @@ export default function App() {
           onModelChange={setSelectedModel}
           useCache={useCache}
           onToggleCache={setUseCache}
-          onRunBatch={() => runBatchEnrichment('FINAL')}
+          onRunBatch={runBatchEnrichment}
           onStopBatch={handleStopBatch}
           isRunning={isRunningBatch}
           totalPending={stats.remaining + stagedLeads.length}
@@ -934,31 +847,31 @@ export default function App() {
         />
 
         {/* Tier 1 vs Tier 2 Dataset Navigation Tabs */}
-        <div className="flex items-center justify-between border-b border-char-light pb-2 font-body">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
           <div className="flex items-center space-x-2">
             <button
               type="button"
               onClick={() => setActiveTab('FINAL_TABLE')}
-              className={`px-4 py-2.5 rounded-full font-bold text-xs inline-flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs inline-flex items-center gap-2 transition-all cursor-pointer ${
                 activeTab === 'FINAL_TABLE'
-                  ? 'bg-gradient-to-r from-ember to-gold text-void'
-                  : 'bg-char text-smoke hover:text-ash border border-char-light'
+                  ? 'bg-emerald-900 text-white shadow-sm'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              <Building2 className="w-4 h-4" />
+              <Building2 className="w-4 h-4 text-emerald-400" />
               Tier 2: Final Enriched Data Table ({records.length})
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('STAGING_VAULT')}
-              className={`px-4 py-2.5 rounded-full font-bold text-xs inline-flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs inline-flex items-center gap-2 transition-all cursor-pointer ${
                 activeTab === 'STAGING_VAULT'
-                  ? 'bg-gradient-to-r from-ember to-gold text-void'
-                  : 'bg-char text-smoke hover:text-ash border border-char-light'
+                  ? 'bg-amber-900 text-white shadow-sm'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              <Database className="w-4 h-4" />
+              <Database className="w-4 h-4 text-amber-400" />
               Tier 1: Staged Raw Leads Vault ({stagedLeads.length})
             </button>
           </div>
@@ -967,9 +880,9 @@ export default function App() {
             <button
               type="button"
               onClick={() => handlePromoteAndEnrichStagedLeads(stagedLeads)}
-              className="px-3 py-1.5 bg-void/60 hover:bg-void border border-char-light text-gold rounded-full text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+              className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
             >
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight className="w-3.5 h-3.5 text-amber-700" />
               Bring Through {stagedLeads.length} Staged Leads to Table
             </button>
           )}
@@ -982,11 +895,6 @@ export default function App() {
             onPromoteAndEnrich={handlePromoteAndEnrichStagedLeads}
             onDeleteStagedLeads={handleDeleteStagedLeads}
             onClearStagingVault={handleClearStagingVault}
-            onResetDisqualifiedStagedLeads={handleResetDisqualifiedStagedLeads}
-            onRunLightSweep={() => runBatchEnrichment('STAGED')}
-            onStopLightSweep={handleStopBatch}
-            isRunningSweep={isRunningBatch}
-            currentActiveRowName={currentActiveCompany?.companyName}
           />
         ) : (
           <ResultsTable
@@ -1034,17 +942,11 @@ export default function App() {
           'Company Name': r.companyName,
           'CRO Reg Number': r.companyNumber,
           'County': r.county,
-          'Decision Maker Name': cleanNullableField(r.decisionMakerName) || '',
-          'Decision Maker Role': cleanNullableField(r.decisionMakerRole) || '',
-          __recordId: r.id,
+          'Decision Maker Name': r.decisionMakerName || '',
+          'Decision Maker Role': r.decisionMakerRole || '',
         }))}
         onConfirmImport={(newRecords) => {
-          // This modal only maps 5 fields (name/CRO/county/decision maker);
-          // merge the relabeled values back onto the existing Tier 2 records
-          // instead of replacing state wholesale, so enrichment fields it
-          // doesn't know about (website, industry, phone, email, etc.)
-          // aren't wiped out.
-          setRecords((prev) => mergeRelabeledRecords(prev, newRecords));
+          setRecords(newRecords);
           setIsTableMappingOpen(false);
         }}
       />

@@ -6,6 +6,3 @@ coverage/
 *.log
 .env*
 !.env.example
-
-# SDD scratch workspace (subagent-driven-development ledgers/briefs/reports)
-.superpowers/
