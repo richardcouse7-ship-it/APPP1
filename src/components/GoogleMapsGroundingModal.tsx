@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MapPin, Search, X, Loader2, Globe, Star, Plus, CheckCircle2 } from 'lucide-react';
 import { CompanyRecord } from '../types';
+import { apiFetch } from '../lib/apiClient';
 
 interface GoogleMapsGroundingModalProps {
   isOpen: boolean;
@@ -30,9 +31,8 @@ export const GoogleMapsGroundingModal: React.FC<GoogleMapsGroundingModalProps> =
     setAddedNotice(null);
 
     try {
-      const res = await fetch('/api/maps-search', {
+      const res = await apiFetch('/api/maps-search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: searchQuery, county }),
       });
 

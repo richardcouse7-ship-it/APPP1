@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, X, Loader2, Award, Target, FileText, CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react';
 import { CompanyRecord } from '../types';
+import { apiFetch } from '../lib/apiClient';
 
 interface AiIntelligenceModalProps {
   isOpen: boolean;
@@ -24,9 +25,8 @@ export const AiIntelligenceModal: React.FC<AiIntelligenceModalProps> = ({
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/ai-analyze-dataset', {
+      const res = await apiFetch('/api/ai-analyze-dataset', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           records,
           prompt: customPrompt || 'Provide lead scoring, top high-priority targets, county density breakdown, and cold outreach recommendations.',

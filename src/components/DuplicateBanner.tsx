@@ -18,24 +18,24 @@ export const DuplicateBanner: React.FC<DuplicateBannerProps> = ({
   if (!analysis.hasDuplicates) return null;
 
   return (
-    <div className="bg-amber-50/90 border border-amber-300 rounded-xl p-4 shadow-xs mb-6 transition-all animate-in fade-in">
+    <div className="bg-char border border-ember/30 rounded-2xl p-4 mb-6 transition-all animate-in fade-in font-body">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start space-x-3">
-          <div className="p-2 bg-amber-100 text-amber-800 rounded-lg shrink-0 mt-0.5">
-            <AlertTriangle className="w-5 h-5 text-amber-600" />
+          <div className="p-2 bg-ember/10 text-ember rounded-full shrink-0 mt-0.5">
+            <AlertTriangle className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h3 className="text-sm font-extrabold text-amber-900 flex items-center gap-1.5">
+              <h3 className="font-display text-sm font-semibold text-ash flex items-center gap-1.5">
                 <span>Automated Upload Check: Potential Duplicates Detected</span>
-                <span className="bg-amber-200/80 text-amber-900 text-[10px] uppercase font-black px-2 py-0.5 rounded-full border border-amber-300">
+                <span className="bg-ember/10 text-ember text-[10px] uppercase font-black px-2 py-0.5 rounded-full border border-ember/30">
                   {analysis.totalDuplicatesCount} Duplicate(s)
                 </span>
               </h3>
             </div>
-            <p className="text-xs text-amber-800 mt-1">
-              Found <strong className="font-bold">{analysis.totalDuplicatesCount}</strong> redundant company record(s) sharing{' '}
-              <strong className="font-bold">{analysis.uniqueCompanyNumbersCount}</strong> Company Number(s) (CRO numbers).
+            <p className="text-xs text-smoke mt-1">
+              Found <strong className="font-bold text-ash">{analysis.totalDuplicatesCount}</strong> redundant company record(s) sharing{' '}
+              <strong className="font-bold text-ash">{analysis.uniqueCompanyNumbersCount}</strong> Company Number(s) (CRO numbers).
               Cleaning duplicate records ensures API quotas are not wasted during batch enrichment.
             </p>
           </div>
@@ -45,7 +45,7 @@ export const DuplicateBanner: React.FC<DuplicateBannerProps> = ({
           <button
             type="button"
             onClick={onAutoClean}
-            className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 active:bg-amber-800 rounded-lg shadow-2xs transition-all gap-1.5 cursor-pointer"
+            className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-void bg-ember hover:bg-ember/90 rounded-full transition-all gap-1.5 cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5" />
             Auto-Clean Dataset ({analysis.totalDuplicatesCount})
@@ -54,9 +54,9 @@ export const DuplicateBanner: React.FC<DuplicateBannerProps> = ({
           <button
             type="button"
             onClick={onReviewDuplicates}
-            className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-amber-900 bg-white hover:bg-amber-100/80 border border-amber-300 rounded-lg transition-colors gap-1.5 cursor-pointer"
+            className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-ash bg-void/60 hover:bg-void border border-char-light rounded-full transition-colors gap-1.5 cursor-pointer"
           >
-            <Eye className="w-3.5 h-3.5 text-amber-700" />
+            <Eye className="w-3.5 h-3.5 text-ember" />
             Review Duplicates
           </button>
 
@@ -64,7 +64,7 @@ export const DuplicateBanner: React.FC<DuplicateBannerProps> = ({
             type="button"
             onClick={onDismiss}
             title="Dismiss notice"
-            className="p-1.5 text-amber-700 hover:text-amber-900 hover:bg-amber-200/60 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-smoke hover:text-ash hover:bg-void/60 rounded-full transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>

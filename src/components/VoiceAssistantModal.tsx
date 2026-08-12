@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Sparkles, X, Loader2, Play } from 'lucide-react';
+import { apiFetch } from '../lib/apiClient';
 
 interface VoiceAssistantModalProps {
   isOpen: boolean;
@@ -101,9 +102,8 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
 
     try {
       const fullContext = `Dataset context: ${recordCount} records loaded. ${statsText}. Question: ${userMessage}`;
-      const res = await fetch('/api/voice-assistant', {
+      const res = await apiFetch('/api/voice-assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: fullContext, voice: 'Kore' }),
       });
 

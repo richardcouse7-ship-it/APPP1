@@ -1,6 +1,13 @@
 export type ProcessStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
 
-export type MatchType = 'OFFICIAL_WEBSITE' | 'FACEBOOK_FALLBACK' | 'NOT_FOUND' | 'UNPROCESSED';
+export type MatchType =
+  | 'OFFICIAL_WEBSITE'
+  | 'FACEBOOK_FALLBACK'
+  | 'NOT_FOUND'
+  | 'UNPROCESSED'
+  | 'DISQUALIFIED'
+  | 'LIGHT_SWEEP_COMPLETE'
+  | 'SHARED_DOMAIN';
 
 export type ConfidenceScore = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
 
@@ -14,8 +21,12 @@ export interface CompanyRecord {
   companyNumber: string;
   companyName: string;
   county: string; // From Address4
+  eircode?: string | null;
   status: ProcessStatus;
   official_website_url: string | null;
+  apexDomain?: string | null;
+  tradingStatus?: 'TRADING' | 'DORMANT_OR_SHELL' | 'NOT_FOUND' | null;
+  category?: string | null; // Light Sweep's coarse category, distinct from the deeper `industry` field below
   industry?: string | null;
   companySummary?: string | null;
   phoneNumber?: string | null;
@@ -44,7 +55,7 @@ export interface FilterState {
   searchTerm: string;
   countyFilter: string;
   statusFilter: 'ALL' | 'PENDING' | 'SUCCESS' | 'FAILED';
-  matchTypeFilter: 'ALL' | 'OFFICIAL_WEBSITE' | 'FACEBOOK_FALLBACK' | 'NOT_FOUND' | 'UNPROCESSED';
+  matchTypeFilter: 'ALL' | 'OFFICIAL_WEBSITE' | 'FACEBOOK_FALLBACK' | 'NOT_FOUND' | 'UNPROCESSED' | 'DISQUALIFIED' | 'LIGHT_SWEEP_COMPLETE' | 'SHARED_DOMAIN';
   confidenceFilter: 'ALL' | 'HIGH' | 'MEDIUM' | 'LOW';
   showOnlySuccessful?: boolean;
 }

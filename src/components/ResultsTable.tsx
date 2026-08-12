@@ -6,11 +6,13 @@ import {
   FileSpreadsheet, X, UserCheck, Linkedin, SlidersHorizontal
 } from 'lucide-react';
 import { CompanyRecord, FilterState, MatchType } from '../types';
+import { cleanNullableField } from '../utils/normalize';
 import { exportRecordsToCSV, downloadCSV } from '../utils/csvUtils';
-import { exportLeadsToGoogleSheets, ExportSheetResult } from '../services/workspaceService';
-import { analyzeDuplicates } from '../utils/duplicateUtils';
+import { exportLeadsToGoogleSheets, ExportSheetResult, GoogleAuthExpiredError } from '../services/workspaceService';
 import { User } from 'firebase/auth';
 import { EditRowModal } from './EditRowModal';
+import { useTableFilters } from '../hooks/useTableFilters';
+import { ResultsTableToolbar } from './ResultsTableToolbar';
 
 interface ResultsTableProps {
   records: CompanyRecord[];
@@ -40,115 +42,34 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
   onGoogleSignIn,
 }) => {
   const [editingRecord, setEditingRecord] = useState<CompanyRecord | null>(null);
-  const [filters, setFilters] = useState<FilterState>({
-    searchTerm: '',
-    countyFilter: 'ALL',
-    statusFilter: 'ALL',
-    matchTypeFilter: 'ALL',
-    confidenceFilter: 'ALL',
-    showOnlySuccessful: false,
-  });
-
-  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState<boolean>(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Analyze duplicates
-  const duplicateAnalysis = useMemo(() => {
-    return analyzeDuplicates(records);
-  }, [records]);
+  // Filter logic — extracted to useTableFilters hook
+  const {
+    filters, setFilters,
+    showOnlyDuplicates, setShowOnlyDuplicates,
+    selectedIds, setSelectedIds,
+    filteredRecords,
+    duplicateAnalysis,
+    successfulMatchesCount,
+    counties,
+    allFilteredSelected,
+    toggleSelectAll,
+    toggleSelectRecord: hookToggleSelect,
+    resetFilters,
+    hasActiveFilters,
+  } = useTableFilters(records);
+
+  // Wrap toggle to stop event propagation at call site
+  const toggleSelectRecord = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    hookToggleSelect(id);
+  };
 
   // Google Sheets export state
   const [isExportingSheet, setIsExportingSheet] = useState(false);
   const [exportSheetResult, setExportSheetResult] = useState<ExportSheetResult | null>(null);
   const [exportSheetError, setExportSheetError] = useState<string | null>(null);
-
-  // Count of successful website matches
-  const successfulMatchesCount = useMemo(() => {
-    return records.filter((r) => r.status === 'SUCCESS' && r.official_website_url).length;
-  }, [records]);
-
-  // Extract unique counties for dropdown filter
-  const counties = useMemo(() => {
-    const set = new Set<string>();
-    records.forEach((r) => {
-      if (r.county) set.add(r.county);
-    });
-    return Array.from(set).sort();
-  }, [records]);
-
-  // Filtered dataset
-  const filteredRecords = useMemo(() => {
-    return records.filter((r) => {
-      // Toggle: Show Only Duplicates
-      if (showOnlyDuplicates) {
-        if (!duplicateAnalysis.duplicateRecordIds.has(r.id)) return false;
-      }
-
-      // Toggle: Show Only Successful Matches
-      if (filters.showOnlySuccessful) {
-        if (r.status !== 'SUCCESS' || !r.official_website_url) return false;
-      }
-
-      // Search Term
-      if (filters.searchTerm) {
-        const term = filters.searchTerm.toLowerCase();
-        const matchesName = r.companyName.toLowerCase().includes(term);
-        const matchesNumber = r.companyNumber.toLowerCase().includes(term);
-        const matchesUrl = r.official_website_url?.toLowerCase().includes(term);
-        const matchesNotes = r.notes?.toLowerCase().includes(term);
-        const matchesDmName = r.decisionMakerName?.toLowerCase().includes(term);
-        const matchesDmRole = r.decisionMakerRole?.toLowerCase().includes(term);
-        const matchesLinkedin = r.linkedinUrl?.toLowerCase().includes(term);
-        if (!matchesName && !matchesNumber && !matchesUrl && !matchesNotes && !matchesDmName && !matchesDmRole && !matchesLinkedin) return false;
-      }
-
-      // County Filter
-      if (filters.countyFilter !== 'ALL' && r.county !== filters.countyFilter) {
-        return false;
-      }
-
-      // Match Type Filter
-      if (filters.matchTypeFilter !== 'ALL' && r.match_type !== filters.matchTypeFilter) {
-        return false;
-      }
-
-      // Status Filter
-      if (filters.statusFilter !== 'ALL' && r.status !== filters.statusFilter) {
-        return false;
-      }
-
-      // Confidence Score Filter
-      if (filters.confidenceFilter !== 'ALL' && r.confidence_score !== filters.confidenceFilter) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [records, filters]);
-
-  // Select all toggle
-  const allFilteredSelected = filteredRecords.length > 0 && filteredRecords.every((r) => selectedIds.has(r.id));
-
-  const toggleSelectAll = () => {
-    if (allFilteredSelected) {
-      setSelectedIds(new Set());
-    } else {
-      const newSet = new Set<string>(filteredRecords.map((r) => r.id));
-      setSelectedIds(newSet);
-    }
-  };
-
-  const toggleSelectRecord = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newSet = new Set(selectedIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
-    } else {
-      newSet.add(id);
-    }
-    setSelectedIds(newSet);
-  };
 
   const handleCopyUrl = (url: string, id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -195,25 +116,28 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
     } catch (err: any) {
       console.error('Failed to export to Google Sheets:', err);
       setExportSheetError(err.message || 'Failed to export to Google Sheets.');
+      if (err instanceof GoogleAuthExpiredError) {
+        onGoogleSignIn();
+      }
     } finally {
       setIsExportingSheet(false);
     }
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+    <div className="bg-char rounded-2xl border border-char-light overflow-hidden font-body">
       {/* Table Header Controls */}
-      <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+      <div className="p-5 border-b border-char-light bg-void/40">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Globe className="w-5 h-5 text-emerald-600" />
+            <h2 className="font-display text-base font-semibold text-ash flex items-center gap-2">
+              <Globe className="w-5 h-5 text-gold" />
               3. Enriched Master Data Table
-              <span className="text-xs font-semibold text-slate-500 bg-slate-200/80 px-2.5 py-0.5 rounded-full">
+              <span className="text-xs font-semibold text-smoke bg-void/60 px-2.5 py-0.5 rounded-full border border-char-light font-mono">
                 Showing {filteredRecords.length} of {records.length}
               </span>
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-smoke mt-0.5">
               Real-time results showing verified official website URLs, B2B contact intelligence, and Google Sheets sync.
             </p>
           </div>
@@ -223,25 +147,25 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             {onOpenColumnMapping && (
               <button
                 onClick={onOpenColumnMapping}
-                className="inline-flex items-center px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-100 hover:bg-indigo-200 border border-indigo-300 rounded-lg shadow-2xs transition-all gap-1.5 cursor-pointer"
+                className="inline-flex items-center px-3 py-2 text-xs font-bold text-ash bg-void/60 hover:bg-void border border-char-light rounded-full transition-all gap-1.5 cursor-pointer"
                 title="Relabel columns or re-map CSV fields"
               >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-700" />
+                <SlidersHorizontal className="w-3.5 h-3.5 text-gold" />
                 Relabel / Map Columns
               </button>
             )}
             <button
               onClick={handleExportToGoogleSheets}
               disabled={records.length === 0 || isExportingSheet}
-              className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-emerald-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg shadow-2xs transition-all gap-1.5 disabled:opacity-50"
+              className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-void bg-gold hover:bg-gold/90 rounded-full transition-all gap-1.5 disabled:opacity-50"
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-900" />
+              <FileSpreadsheet className="w-4 h-4" />
               {isExportingSheet ? 'Creating Sheet...' : 'Export to Google Sheets'}
             </button>
             <button
               onClick={() => handleDownloadMasterCSV(true)}
               disabled={records.length === 0}
-              className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-lg shadow-2xs transition-all gap-1.5 disabled:opacity-50"
+              className="inline-flex items-center px-3.5 py-2 text-xs font-bold text-void bg-ember hover:bg-ember/90 rounded-full transition-all gap-1.5 disabled:opacity-50"
             >
               <FileDown className="w-4 h-4" />
               Download Enriched CSV
@@ -249,9 +173,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             <button
               onClick={() => handleDownloadMasterCSV(false)}
               disabled={records.length === 0}
-              className="inline-flex items-center px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg shadow-2xs transition-all gap-1.5 disabled:opacity-50"
+              className="inline-flex items-center px-3 py-2 text-xs font-semibold text-ash bg-void/60 hover:bg-void border border-char-light rounded-full transition-all gap-1.5 disabled:opacity-50"
             >
-              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <Download className="w-3.5 h-3.5 text-smoke" />
               CSV All
             </button>
           </div>
@@ -259,12 +183,12 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
 
         {/* Google Sheets Success Modal Notification */}
         {exportSheetResult && (
-          <div className="mt-3 p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs text-emerald-900 shadow-xs animate-in fade-in">
+          <div className="mt-3 p-3.5 bg-gold/10 border border-gold/30 rounded-xl flex items-center justify-between text-xs text-ash animate-in fade-in">
             <div className="flex items-center space-x-2.5">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <CheckCircle2 className="w-5 h-5 text-gold shrink-0" />
               <div>
                 <div className="font-bold">Google Sheet Created Successfully!</div>
-                <div className="text-emerald-700">"{exportSheetResult.title}" created in your Google Drive.</div>
+                <div className="text-smoke">"{exportSheetResult.title}" created in your Google Drive.</div>
               </div>
             </div>
             <div className="flex items-center space-x-2">
@@ -272,13 +196,13 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                 href={exportSheetResult.spreadsheetUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition-colors shadow-2xs"
+                className="inline-flex items-center px-3 py-1.5 bg-gold hover:bg-gold/90 text-void font-bold rounded-full text-xs transition-colors"
               >
                 Open Google Sheet <ExternalLink className="w-3 h-3 ml-1" />
               </a>
               <button
                 onClick={() => setExportSheetResult(null)}
-                className="text-emerald-700 hover:text-emerald-950 font-semibold px-2 py-1"
+                className="text-smoke hover:text-ash font-semibold px-2 py-1"
               >
                 Dismiss
               </button>
@@ -287,239 +211,42 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         )}
 
         {exportSheetError && (
-          <div className="mt-3 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center justify-between">
+          <div className="mt-3 p-3 bg-ember/10 border border-ember/30 text-ember text-xs rounded-xl flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{exportSheetError}</span>
             </div>
-            <button onClick={() => setExportSheetError(null)} className="font-semibold text-red-800">Dismiss</button>
+            <button onClick={() => setExportSheetError(null)} className="font-semibold text-ash">Dismiss</button>
           </div>
         )}
 
 
-        {/* Filters & Search Toolbar */}
-        <div className="mt-4 pt-3.5 border-t border-slate-200/80 space-y-3 bg-slate-50/50 -mx-6 px-6 py-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center space-x-2">
-              <div className="p-1.5 bg-emerald-100 text-emerald-800 rounded-md">
-                <Filter className="w-3.5 h-3.5" />
-              </div>
-              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Filter Dataset</span>
-              <span className="text-[11px] font-semibold text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">
-                Showing {filteredRecords.length} of {records.length}
-              </span>
-            </div>
-
-            <div className="flex items-center flex-wrap gap-2">
-              {/* Show Only Duplicates Toggle */}
-              {duplicateAnalysis.hasDuplicates && (
-                <button
-                  type="button"
-                  onClick={() => setShowOnlyDuplicates(!showOnlyDuplicates)}
-                  className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer shadow-2xs ${
-                    showOnlyDuplicates
-                      ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-500/30'
-                      : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                  }`}
-                >
-                  <AlertCircle className={`w-3.5 h-3.5 mr-1.5 ${showOnlyDuplicates ? 'text-white' : 'text-amber-600'}`} />
-                  <span>Duplicates Only</span>
-                  <span className={`ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                    showOnlyDuplicates ? 'bg-amber-800 text-amber-100' : 'bg-amber-200 text-amber-900'
-                  }`}>
-                    {duplicateAnalysis.totalDuplicatesCount}
-                  </span>
-                </button>
-              )}
-
-              {/* Show Only Successful Matches Toggle */}
-              <button
-                type="button"
-                onClick={() => setFilters((prev) => ({ ...prev, showOnlySuccessful: !prev.showOnlySuccessful }))}
-                className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer shadow-2xs ${
-                  filters.showOnlySuccessful
-                    ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-500/30'
-                    : 'bg-white text-slate-700 border-slate-300 hover:bg-emerald-50/50 hover:border-emerald-300'
-                }`}
-              >
-                <CheckCircle2 className={`w-3.5 h-3.5 mr-1.5 ${filters.showOnlySuccessful ? 'text-white' : 'text-emerald-600'}`} />
-                <span>Show Only Successful</span>
-                <span className={`ml-2 px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                  filters.showOnlySuccessful ? 'bg-emerald-800 text-emerald-100' : 'bg-slate-100 text-slate-700'
-                }`}>
-                  {successfulMatchesCount}
-                </span>
-              </button>
-
-              {/* Reset Filters CTA */}
-              {(filters.showOnlySuccessful || showOnlyDuplicates || filters.searchTerm || filters.countyFilter !== 'ALL' || filters.matchTypeFilter !== 'ALL' || filters.statusFilter !== 'ALL' || filters.confidenceFilter !== 'ALL') && (
-                <button
-                  onClick={() => {
-                    setShowOnlyDuplicates(false);
-                    setFilters({
-                      searchTerm: '',
-                      countyFilter: 'ALL',
-                      statusFilter: 'ALL',
-                      matchTypeFilter: 'ALL',
-                      confidenceFilter: 'ALL',
-                      showOnlySuccessful: false,
-                    });
-                  }}
-                  className="px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:text-red-600 bg-white hover:bg-red-50 border border-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" /> Reset All
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Filter Dropdowns Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-            {/* Search Box */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Search name, CRO, decision maker..."
-                value={filters.searchTerm}
-                onChange={(e) => setFilters({ ...filters, searchTerm: e.target.value })}
-                className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-medium"
-              />
-            </div>
-
-            {/* Status Filter */}
-            <div className="relative">
-              <select
-                value={filters.statusFilter}
-                onChange={(e) => setFilters({ ...filters, statusFilter: e.target.value as any })}
-                className={`w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-semibold ${
-                  filters.statusFilter !== 'ALL' ? 'border-emerald-500 text-emerald-900 bg-emerald-50/30' : 'border-slate-300 text-slate-700'
-                }`}
-              >
-                <option value="ALL">Status: All</option>
-                <option value="SUCCESS">Success / Enriched</option>
-                <option value="FAILED">Failed</option>
-                <option value="PENDING">Pending Batch</option>
-              </select>
-            </div>
-
-            {/* Confidence Score Filter */}
-            <div className="relative">
-              <select
-                value={filters.confidenceFilter}
-                onChange={(e) => setFilters({ ...filters, confidenceFilter: e.target.value as any })}
-                className={`w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-semibold ${
-                  filters.confidenceFilter !== 'ALL' ? 'border-emerald-500 text-emerald-900 bg-emerald-50/30' : 'border-slate-300 text-slate-700'
-                }`}
-              >
-                <option value="ALL">Confidence: All</option>
-                <option value="HIGH">High Confidence</option>
-                <option value="MEDIUM">Medium Confidence</option>
-                <option value="LOW">Low Confidence</option>
-              </select>
-            </div>
-
-            {/* Match Type Filter */}
-            <div className="relative">
-              <select
-                value={filters.matchTypeFilter}
-                onChange={(e) => setFilters({ ...filters, matchTypeFilter: e.target.value as any })}
-                className={`w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-semibold ${
-                  filters.matchTypeFilter !== 'ALL' ? 'border-emerald-500 text-emerald-900 bg-emerald-50/30' : 'border-slate-300 text-slate-700'
-                }`}
-              >
-                <option value="ALL">Match Type: All</option>
-                <option value="OFFICIAL_WEBSITE">Official Website</option>
-                <option value="FACEBOOK_FALLBACK">Facebook Fallback</option>
-                <option value="NOT_FOUND">Not Found / Excluded</option>
-                <option value="UNPROCESSED">Unprocessed</option>
-              </select>
-            </div>
-
-            {/* County Filter */}
-            <div className="relative">
-              <select
-                value={filters.countyFilter}
-                onChange={(e) => setFilters({ ...filters, countyFilter: e.target.value })}
-                className={`w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-semibold ${
-                  filters.countyFilter !== 'ALL' ? 'border-emerald-500 text-emerald-900 bg-emerald-50/30' : 'border-slate-300 text-slate-700'
-                }`}
-              >
-                <option value="ALL">County: All ({counties.length})</option>
-                {counties.map((county) => (
-                  <option key={county} value={county}>
-                    County {county}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Active Filter Chips Bar */}
-          {(filters.statusFilter !== 'ALL' || filters.confidenceFilter !== 'ALL' || filters.matchTypeFilter !== 'ALL' || filters.countyFilter !== 'ALL' || filters.searchTerm) && (
-            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
-              <span className="font-semibold text-slate-400">Active filters:</span>
-
-              {filters.statusFilter !== 'ALL' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold border border-emerald-200">
-                  Status: {filters.statusFilter}
-                  <button onClick={() => setFilters({ ...filters, statusFilter: 'ALL' })} className="hover:text-emerald-950 cursor-pointer">
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-
-              {filters.confidenceFilter !== 'ALL' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-semibold border border-blue-200">
-                  Confidence: {filters.confidenceFilter}
-                  <button onClick={() => setFilters({ ...filters, confidenceFilter: 'ALL' })} className="hover:text-blue-950 cursor-pointer">
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-
-              {filters.matchTypeFilter !== 'ALL' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-semibold border border-purple-200">
-                  Match: {filters.matchTypeFilter.replace('_', ' ')}
-                  <button onClick={() => setFilters({ ...filters, matchTypeFilter: 'ALL' })} className="hover:text-purple-950 cursor-pointer">
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-
-              {filters.countyFilter !== 'ALL' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-200 text-slate-800 font-semibold border border-slate-300">
-                  County: {filters.countyFilter}
-                  <button onClick={() => setFilters({ ...filters, countyFilter: 'ALL' })} className="hover:text-slate-950 cursor-pointer">
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-
-              {filters.searchTerm && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-200">
-                  Search: "{filters.searchTerm}"
-                  <button onClick={() => setFilters({ ...filters, searchTerm: '' })} className="hover:text-amber-950 cursor-pointer">
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-            </div>
-          )}
-        </div>
+        <ResultsTableToolbar
+          filters={filters}
+          setFilters={setFilters}
+          showOnlyDuplicates={showOnlyDuplicates}
+          setShowOnlyDuplicates={setShowOnlyDuplicates}
+          duplicateAnalysis={duplicateAnalysis}
+          successfulMatchesCount={successfulMatchesCount}
+          counties={counties}
+          totalCount={records.length}
+          filteredCount={filteredRecords.length}
+          resetFilters={resetFilters}
+          hasActiveFilters={hasActiveFilters}
+        />
 
         {/* Selected Batch Actions Bar */}
         {selectedIds.size > 0 && (
-          <div className="mt-3 p-3 bg-emerald-900 text-white rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-md animate-in fade-in">
+          <div className="mt-3 p-3 bg-void text-ash rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs border border-gold/30 animate-in fade-in">
             <div className="flex items-center space-x-3">
-              <span className="font-bold bg-emerald-800 px-3 py-1 rounded-lg border border-emerald-700 text-emerald-100 flex items-center gap-1.5">
-                <CheckSquare className="w-4 h-4 text-emerald-300" />
+              <span className="font-bold bg-char px-3 py-1 rounded-full border border-char-light text-gold flex items-center gap-1.5">
+                <CheckSquare className="w-4 h-4" />
                 {selectedIds.size} {selectedIds.size === 1 ? 'company' : 'companies'} selected
               </span>
               <button
                 type="button"
                 onClick={toggleSelectAll}
-                className="text-emerald-200 hover:text-white underline font-semibold text-xs cursor-pointer"
+                className="text-smoke hover:text-ash underline font-semibold text-xs cursor-pointer"
               >
                 {allFilteredSelected ? 'Deselect All' : `Select All Filtered (${filteredRecords.length})`}
               </button>
@@ -532,10 +259,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                   onResetRecordStatus(Array.from(selectedIds));
                   setSelectedIds(new Set());
                 }}
-                className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 border border-emerald-500 rounded-lg text-xs font-bold text-white transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                className="px-3 py-1.5 bg-char hover:bg-char-light border border-char-light rounded-full text-xs font-bold text-gold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
                 title="Reset status of selected records to Pending to re-run search"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-emerald-200" />
+                <RefreshCw className="w-3.5 h-3.5" />
                 Reset Status to Pending ({selectedIds.size})
               </button>
 
@@ -547,7 +274,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     setSelectedIds(new Set());
                   }
                 }}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                className="px-3 py-1.5 bg-ember hover:bg-ember/90 text-void rounded-full text-xs font-bold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
                 title="Remove selected records from dataset"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -557,7 +284,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedIds(new Set())}
-                className="px-2.5 py-1.5 bg-emerald-800/80 hover:bg-emerald-800 text-emerald-200 hover:text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                className="px-2.5 py-1.5 bg-char/80 hover:bg-char text-smoke hover:text-ash rounded-full text-xs font-semibold transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -570,21 +297,22 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-slate-100/80 text-slate-700 text-[11px] font-bold uppercase tracking-wider border-b border-slate-200">
+            <tr className="bg-void/60 text-smoke text-[11px] font-bold uppercase tracking-wider border-b border-char-light">
               <th className="py-3 px-3 w-10 text-center">
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="p-1 hover:text-emerald-700 text-slate-400 cursor-pointer"
+                  className="p-1 hover:text-gold text-smoke cursor-pointer"
                   title={allFilteredSelected ? 'Deselect All Filtered Companies' : 'Select All Filtered Companies'}
                 >
                   {allFilteredSelected ? (
-                    <CheckSquare className="w-4 h-4 text-emerald-600" />
+                    <CheckSquare className="w-4 h-4 text-gold" />
                   ) : (
                     <Square className="w-4 h-4" />
                   )}
                 </button>
               </th>
+              <th className="py-3 px-3 w-6"></th>
               <th className="py-3 px-3">Company Name</th>
               <th className="py-3 px-3">CRO / County</th>
               <th className="py-3 px-3 min-w-[200px]">Official Website URL</th>
@@ -597,14 +325,14 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
               <th className="py-3 px-3 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200/80 text-xs">
+          <tbody className="divide-y divide-char-light text-xs">
             {filteredRecords.length === 0 ? (
               <tr>
-                <td colSpan={11} className="py-12 text-center text-slate-400 bg-slate-50/50">
+                <td colSpan={12} className="py-12 text-center text-smoke bg-void/30">
                   <div className="flex flex-col items-center justify-center space-y-2">
-                    <Globe className="w-8 h-8 text-slate-300" />
-                    <p className="font-semibold text-slate-600">No company records match your current filter.</p>
-                    <p className="text-xs text-slate-400">Import a CSV file or load sample companies to begin enrichment.</p>
+                    <Globe className="w-8 h-8 text-char-light" />
+                    <p className="font-semibold text-ash">No company records match your current filter.</p>
+                    <p className="text-xs text-smoke">Import a CSV file or load sample companies to begin enrichment.</p>
                   </div>
                 </td>
               </tr>
@@ -612,15 +340,28 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
               filteredRecords.map((record) => {
                 const isSelected = selectedIds.has(record.id);
                 const isDuplicate = duplicateAnalysis.duplicateRecordIds.has(record.id);
+                const statusDotClass =
+                  record.match_type === 'OFFICIAL_WEBSITE'
+                    ? 'bg-gold shadow-[0_0_6px_var(--color-gold)]'
+                    : record.match_type === 'FACEBOOK_FALLBACK'
+                      ? 'bg-ember shadow-[0_0_6px_var(--color-ember)]'
+                      : record.status === 'PROCESSING'
+                        ? 'bg-gold animate-pulse'
+                        : 'bg-smoke';
+                const decisionMakerName = cleanNullableField(record.decisionMakerName);
+                const contactEmail = cleanNullableField(record.contactEmail);
+                const decisionMakerRole = cleanNullableField(record.decisionMakerRole);
+                const industry = cleanNullableField(record.industry);
+                const phoneNumber = cleanNullableField(record.phoneNumber);
 
                 return (
                   <tr
                     key={record.id}
                     onClick={() => onSelectCompany(record)}
-                    className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
-                      record.status === 'PROCESSING' ? 'bg-emerald-50/40 animate-pulse' : ''
-                    } ${isSelected ? 'bg-emerald-50/20' : ''} ${
-                      isDuplicate ? 'bg-amber-50/30' : ''
+                    className={`hover:bg-void/40 transition-colors cursor-pointer ${
+                      record.status === 'PROCESSING' ? 'bg-gold/5 animate-pulse' : ''
+                    } ${isSelected ? 'bg-gold/5' : ''} ${
+                      isDuplicate ? 'bg-ember/5' : ''
                     }`}
                   >
                     {/* Checkbox */}
@@ -628,38 +369,43 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                       <button
                         type="button"
                         onClick={(e) => toggleSelectRecord(record.id, e)}
-                        className="p-1 text-slate-400 hover:text-emerald-600"
+                        className="p-1 text-smoke hover:text-gold"
                       >
                         {isSelected ? (
-                          <CheckSquare className="w-4 h-4 text-emerald-600" />
+                          <CheckSquare className="w-4 h-4 text-gold" />
                         ) : (
                           <Square className="w-4 h-4" />
                         )}
                       </button>
                     </td>
 
+                    {/* Status Dot */}
+                    <td className="py-3 px-3" title={record.match_type}>
+                      <span className={`block w-2 h-2 rounded-full ${statusDotClass}`} />
+                    </td>
+
                     {/* Company Name */}
-                    <td className="py-3 px-3 font-bold text-slate-900 flex items-center gap-2">
+                    <td className="py-3 px-3 font-bold text-ash flex items-center gap-2">
                       <span>{record.companyName}</span>
                       {record.status === 'PROCESSING' && (
-                        <RefreshCw className="w-3 h-3 text-emerald-600 animate-spin shrink-0" />
+                        <RefreshCw className="w-3 h-3 text-gold animate-spin shrink-0" />
                       )}
                     </td>
 
                     {/* CRO & County */}
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-slate-500 text-[11px]">{record.companyNumber}</span>
+                        <span className="font-mono text-smoke text-[11px]">{record.companyNumber}</span>
                         {isDuplicate && (
                           <span
-                            className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300"
+                            className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-ember/10 text-ember border border-ember/30"
                             title="Multiple records share this Company / CRO Number"
                           >
                             Duplicate
                           </span>
                         )}
                       </div>
-                      <div className="font-semibold text-slate-700 text-[11px]">Co. {record.county}</div>
+                      <div className="font-semibold text-ash text-[11px]">Co. {record.county}</div>
                     </td>
 
                     {/* Official Website URL */}
@@ -671,51 +417,51 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
-                            className="font-mono text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:underline truncate flex items-center gap-1"
+                            className="font-mono text-xs font-semibold text-gold hover:text-ash hover:underline truncate flex items-center gap-1"
                           >
                             <span className="truncate">{record.official_website_url}</span>
-                            <ExternalLink className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <ExternalLink className="w-3 h-3 shrink-0" />
                           </a>
                           <button
                             type="button"
                             onClick={(e) => handleCopyUrl(record.official_website_url!, record.id, e)}
-                            className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors shrink-0"
+                            className="p-1 text-smoke hover:text-ash rounded transition-colors shrink-0"
                             title="Copy URL"
                           >
                             {copiedId === record.id ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              <Check className="w-3.5 h-3.5 text-gold" />
                             ) : (
                               <Copy className="w-3.5 h-3.5" />
                             )}
                           </button>
                         </div>
                       ) : record.status === 'SUCCESS' ? (
-                        <span className="text-slate-400 italic text-[11px]">No Official Domain</span>
+                        <span className="text-smoke italic text-[11px]">No Official Domain</span>
                       ) : record.status === 'PROCESSING' ? (
-                        <span className="text-emerald-600 font-medium text-[11px] animate-pulse">Researching website...</span>
+                        <span className="text-gold font-medium text-[11px] animate-pulse">Researching website...</span>
                       ) : (
-                        <span className="text-slate-400 text-[11px]">Pending Step 2</span>
+                        <span className="text-smoke text-[11px]">Pending Step 2</span>
                       )}
                     </td>
 
                     {/* Key Decision Maker */}
                     <td className="py-3 px-3">
-                      {record.decisionMakerName ? (
+                      {decisionMakerName ? (
                         <div className="space-y-0.5 max-w-[170px]">
-                          <div className="flex items-center text-slate-900 font-bold text-xs gap-1 truncate">
-                            <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span className="truncate">{record.decisionMakerName}</span>
+                          <div className="flex items-center text-ash font-bold text-xs gap-1 truncate">
+                            <UserCheck className="w-3.5 h-3.5 text-gold shrink-0" />
+                            <span className="truncate">{decisionMakerName}</span>
                           </div>
-                          {record.decisionMakerRole && (
-                            <div className="text-[10px] font-semibold text-slate-500 truncate pl-4">
-                              {record.decisionMakerRole}
+                          {decisionMakerRole && (
+                            <div className="text-[10px] font-semibold text-smoke truncate pl-4">
+                              {decisionMakerRole}
                             </div>
                           )}
                         </div>
                       ) : record.status === 'SUCCESS' ? (
-                        <span className="text-slate-400 text-[11px] italic">Not listed</span>
+                        <span className="text-smoke text-[11px] italic">Not listed</span>
                       ) : (
-                        <span className="text-slate-300 text-[11px]">&mdash;</span>
+                        <span className="text-char-light text-[11px]">&mdash;</span>
                       )}
                     </td>
 
@@ -727,85 +473,81 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className={`inline-flex items-center px-2 py-1 rounded-md text-[11px] font-semibold transition-colors border ${
-                            record.linkedinType === 'DECISION_MAKER'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800'
-                              : 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 hover:text-sky-800'
-                          }`}
+                          className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-semibold transition-colors border bg-void/60 text-ash border-char-light hover:border-gold/40 hover:text-gold"
                           title={`Click to view ${
                             record.linkedinType === 'DECISION_MAKER' ? 'Decision Maker LinkedIn Profile' : 'Business LinkedIn Page'
                           }`}
                         >
-                          <Linkedin className="w-3.5 h-3.5 mr-1 shrink-0 text-blue-600" />
+                          <Linkedin className="w-3.5 h-3.5 mr-1 shrink-0" />
                           <span>
                             {record.linkedinType === 'DECISION_MAKER' ? 'DM Profile' : 'Company Page'}
                           </span>
                           <ExternalLink className="w-3 h-3 ml-1 opacity-70 shrink-0" />
                         </a>
                       ) : record.status === 'SUCCESS' ? (
-                        <span className="inline-flex items-center text-slate-400 text-[11px] italic gap-1">
-                          <Linkedin className="w-3 h-3 text-slate-300 shrink-0" />
+                        <span className="inline-flex items-center text-smoke text-[11px] italic gap-1">
+                          <Linkedin className="w-3 h-3 shrink-0" />
                           <span>LinkedIn Not Found</span>
                         </span>
                       ) : (
-                        <span className="text-slate-300 text-[11px]">&mdash;</span>
+                        <span className="text-char-light text-[11px]">&mdash;</span>
                       )}
                     </td>
 
                     {/* Industry / Sector */}
                     <td className="py-3 px-3">
-                      {record.industry ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
-                          <Building className="w-3 h-3 mr-1 text-slate-500" /> {record.industry}
+                      {industry ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-void/60 text-ash border border-char-light">
+                          <Building className="w-3 h-3 mr-1 text-smoke" /> {industry}
                         </span>
                       ) : record.status === 'SUCCESS' ? (
-                        <span className="text-slate-400 text-[11px] italic">General B2B</span>
+                        <span className="text-smoke text-[11px] italic">General B2B</span>
                       ) : (
-                        <span className="text-slate-300 text-[11px]">&mdash;</span>
+                        <span className="text-char-light text-[11px]">&mdash;</span>
                       )}
                     </td>
 
                     {/* Verified Contact Info */}
                     <td className="py-3 px-3">
-                      {record.phoneNumber || record.contactEmail ? (
+                      {phoneNumber || contactEmail ? (
                         <div className="space-y-0.5 text-[11px]">
-                          {record.phoneNumber && (
-                            <div className="flex items-center text-slate-700 font-mono gap-1">
-                              <Phone className="w-3 h-3 text-emerald-600 shrink-0" /> {record.phoneNumber}
+                          {phoneNumber && (
+                            <div className="flex items-center text-ash font-mono gap-1">
+                              <Phone className="w-3 h-3 text-gold shrink-0" /> {phoneNumber}
                             </div>
                           )}
-                          {record.contactEmail && (
-                            <div className="flex items-center text-slate-600 font-mono gap-1 truncate max-w-[150px]">
-                              <Mail className="w-3 h-3 text-blue-600 shrink-0" /> {record.contactEmail}
+                          {contactEmail && (
+                            <div className="flex items-center text-smoke font-mono gap-1 truncate max-w-[150px]">
+                              <Mail className="w-3 h-3 text-gold shrink-0" /> {contactEmail}
                             </div>
                           )}
                         </div>
                       ) : record.status === 'SUCCESS' ? (
-                        <span className="text-slate-400 text-[11px] italic">No public contact</span>
+                        <span className="text-smoke text-[11px] italic">No public contact</span>
                       ) : (
-                        <span className="text-slate-300 text-[11px]">&mdash;</span>
+                        <span className="text-char-light text-[11px]">&mdash;</span>
                       )}
                     </td>
 
                     {/* Match Type Badge */}
                     <td className="py-3 px-3">
                       {record.match_type === 'OFFICIAL_WEBSITE' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          <Globe className="w-3 h-3 mr-1 text-emerald-600" /> Official Web
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-gold/10 text-gold border border-gold/30">
+                          <Globe className="w-3 h-3 mr-1" /> Official Web
                         </span>
                       )}
                       {record.match_type === 'FACEBOOK_FALLBACK' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                          <Facebook className="w-3 h-3 mr-1 text-amber-600" /> FB Fallback
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-ember/10 text-ember border border-ember/30">
+                          <Facebook className="w-3 h-3 mr-1" /> FB Fallback
                         </span>
                       )}
                       {record.match_type === 'NOT_FOUND' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-void/60 text-smoke border border-char-light">
                           Directory Excluded
                         </span>
                       )}
                       {record.match_type === 'UNPROCESSED' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-400 border border-slate-200/60">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-void/40 text-char-light border border-char-light/60">
                           Pending
                         </span>
                       )}
@@ -814,22 +556,22 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     {/* Confidence Score */}
                     <td className="py-3 px-3">
                       {record.confidence_score === 'HIGH' && (
-                        <span className="px-2 py-0.5 text-[10px] font-extrabold text-emerald-800 bg-emerald-100/90 rounded">
+                        <span className="px-2 py-0.5 text-[10px] font-extrabold text-gold bg-gold/10 rounded-full">
                           HIGH
                         </span>
                       )}
                       {record.confidence_score === 'MEDIUM' && (
-                        <span className="px-2 py-0.5 text-[10px] font-extrabold text-amber-800 bg-amber-100/90 rounded">
+                        <span className="px-2 py-0.5 text-[10px] font-extrabold text-ember bg-ember/10 rounded-full">
                           MEDIUM
                         </span>
                       )}
                       {record.confidence_score === 'LOW' && (
-                        <span className="px-2 py-0.5 text-[10px] font-semibold text-slate-600 bg-slate-100 rounded">
+                        <span className="px-2 py-0.5 text-[10px] font-semibold text-smoke bg-void/60 rounded-full">
                           LOW
                         </span>
                       )}
                       {record.confidence_score === 'NONE' && (
-                        <span className="text-slate-400 text-[11px]">&mdash;</span>
+                        <span className="text-char-light text-[11px]">&mdash;</span>
                       )}
                     </td>
 
@@ -839,7 +581,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                         <button
                           type="button"
                           onClick={() => setEditingRecord(record)}
-                          className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors"
+                          className="p-1.5 text-smoke hover:text-gold hover:bg-void/60 rounded-full transition-colors"
                           title="Relabel / Edit Row Data"
                         >
                           <Edit3 className="w-4 h-4" />
@@ -847,7 +589,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                         <button
                           type="button"
                           onClick={() => onSelectCompany(record)}
-                          className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 rounded-md transition-colors"
+                          className="p-1.5 text-smoke hover:text-ash hover:bg-void/60 rounded-full transition-colors"
                           title="View Details & Notes"
                         >
                           <Eye className="w-4 h-4" />
@@ -856,7 +598,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                           type="button"
                           onClick={() => onReEnrichSingle(record)}
                           disabled={isProcessingBatch}
-                          className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors disabled:opacity-40"
+                          className="p-1.5 text-smoke hover:text-gold hover:bg-void/60 rounded-full transition-colors disabled:opacity-40"
                           title="Re-verify Single Company"
                         >
                           <Sparkles className="w-4 h-4" />

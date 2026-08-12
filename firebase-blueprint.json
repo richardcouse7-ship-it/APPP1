@@ -22,21 +22,71 @@
         "companyName": { "type": "string" },
         "companyNumber": { "type": "string" },
         "county": { "type": "string" },
+        "eircode": { "type": "string" },
         "official_website_url": { "type": "string" },
+        "apexDomain": { "type": "string" },
+        "tradingStatus": { "type": "string" },
+        "category": { "type": "string" },
+        "industry": { "type": "string" },
+        "companySummary": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "decisionMakerName": { "type": "string" },
+        "decisionMakerRole": { "type": "string" },
+        "linkedinUrl": { "type": "string" },
+        "linkedinType": { "type": "string" },
+        "verificationStatus": { "type": "string" },
         "confidence_score": { "type": "string" },
         "match_type": { "type": "string" },
         "notes": { "type": "string" },
-        "decisionMakerName": { "type": "string" },
-        "decisionMakerRole": { "type": "string" },
-        "phoneNumber": { "type": "string" },
-        "contactEmail": { "type": "string" },
-        "industry": { "type": "string" },
         "status": { "type": "string" },
+        "grounding_sources": { "type": "array" },
+        "processedAt": { "type": "string" },
+        "isManualEdit": { "type": "boolean" },
+        "rawRowData": { "type": "object" },
+        "originalHeaders": { "type": "array" },
         "userId": { "type": "string" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "companyName", "userId"]
+    },
+    "StagedLead": {
+      "title": "Staged Lead",
+      "description": "Raw unenriched business record in the Tier 1 Staging Vault",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "companyNumber": { "type": "string" },
+        "county": { "type": "string" },
+        "eircode": { "type": "string" },
+        "status": { "type": "string" },
+        "tradingStatus": { "type": "string" },
+        "category": { "type": "string" },
+        "match_type": { "type": "string" },
+        "official_website_url": { "type": "string" },
+        "apexDomain": { "type": "string" },
+        "confidence_score": { "type": "string" },
+        "notes": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "rawRowData": { "type": "object" },
+        "originalHeaders": { "type": "array" },
+        "userId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "companyName", "userId"]
+    },
+    "EnrichmentCache": {
+      "title": "Enrichment Cache Entry",
+      "description": "Server-side cache entry for LLM enrichment results, keyed by mode + company + county",
+      "type": "object",
+      "properties": {
+        "cacheKey": { "type": "string" },
+        "result": { "type": "object" },
+        "cachedAt": { "type": "number" }
+      },
+      "required": ["cacheKey", "result", "cachedAt"]
     }
   },
   "firestore": {
@@ -46,7 +96,15 @@
     },
     "/users/{userId}/companies/{companyId}": {
       "schema": { "$ref": "#/entities/CompanyRecord" },
-      "description": "Saved company records for a user"
+      "description": "Saved enriched company records for a user (Tier 2)"
+    },
+    "/users/{userId}/staged_leads/{leadId}": {
+      "schema": { "$ref": "#/entities/StagedLead" },
+      "description": "Raw unenriched staged leads for a user (Tier 1)"
+    },
+    "/enrichmentCache/{cacheKey}": {
+      "schema": { "$ref": "#/entities/EnrichmentCache" },
+      "description": "Server-side enrichment cache for LLM results (L2 persistent cache)"
     }
   }
 }

@@ -1,5 +1,44 @@
 import { CompanyRecord } from '../types';
 import { smartExtractAndHealRecords } from '../utils/csvUtils';
+import { getValidAccessToken, refreshAccessToken } from '../lib/firebaseAuth';
+import { cleanNullableField } from '../utils/normalize';
+
+/**
+ * Thrown when a Drive/Sheets request fails auth even after a token refresh
+ * attempt — the caller should prompt the user to reconnect their Google account.
+ */
+export class GoogleAuthExpiredError extends Error {
+  constructor(message = 'Your Google session has expired. Please reconnect your Google account.') {
+    super(message);
+    this.name = 'GoogleAuthExpiredError';
+  }
+}
+
+/**
+ * Runs an authorized Drive/Sheets fetch, transparently refreshing the access
+ * token on a 401 and retrying once before giving up.
+ */
+async function authorizedFetch(url: string, init: RequestInit, accessToken: string): Promise<Response> {
+  const buildInit = (token: string): RequestInit => ({
+    ...init,
+    headers: { ...(init.headers || {}), Authorization: `Bearer ${token}` },
+  });
+
+  let token = (await getValidAccessToken()) || accessToken;
+  let res = await fetch(url, buildInit(token));
+
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken(false);
+    if (refreshed) {
+      res = await fetch(url, buildInit(refreshed));
+    }
+    if (res.status === 401) {
+      throw new GoogleAuthExpiredError();
+    }
+  }
+
+  return res;
+}
 
 export interface DriveFileItem {
   id: string;
@@ -15,6 +54,54 @@ export interface ExportSheetResult {
   title: string;
 }
 
+export const SHEET_HEADERS = [
+  'CRO Reg #',
+  'Business Name',
+  'County',
+  'Official Website URL',
+  'Decision Maker Name',
+  'Decision Maker Role',
+  'LinkedIn URL',
+  'LinkedIn Type',
+  'Industry / Sector',
+  'Company Overview',
+  'Phone',
+  'Contact Email',
+  'Lead Verification Status',
+  'Confidence Score',
+  'Match Type',
+  'Process Status',
+  'Research Notes',
+  'Processed At',
+];
+
+/**
+ * Builds the Google Sheets row data for an export. Pure and side-effect-free
+ * so it can be unit-tested without a live Sheets API call.
+ */
+export function buildSheetRows(records: CompanyRecord[]): (string)[][] {
+  return records.map((r) => [
+    r.companyNumber || '',
+    r.companyName || '',
+    r.county || '',
+    r.official_website_url || 'N/A',
+    cleanNullableField(r.decisionMakerName) || 'N/A',
+    cleanNullableField(r.decisionMakerRole) || 'N/A',
+    r.linkedinUrl || 'N/A',
+    r.linkedinType === 'DECISION_MAKER' ? 'Decision Maker Profile' : r.linkedinType === 'COMPANY' ? 'Company LinkedIn Page' : 'Not Found',
+    cleanNullableField(r.industry) || 'N/A',
+    cleanNullableField(r.companySummary) || 'N/A',
+    cleanNullableField(r.phoneNumber) || 'N/A',
+    cleanNullableField(r.contactEmail) || 'N/A',
+    r.verificationStatus || 'UNPROCESSED',
+    r.confidence_score || 'NONE',
+    r.match_type || 'UNPROCESSED',
+    r.status || 'PENDING',
+    r.notes || '',
+    r.processedAt ? new Date(r.processedAt).toLocaleString('en-IE') : '',
+  ]);
+}
+
 /**
  * Creates a new Google Sheet in the user's Google Drive and populates it with enriched leads data.
  */
@@ -28,18 +115,19 @@ export async function exportLeadsToGoogleSheets(
   }
 
   // 1. Create a new Spreadsheet
-  const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+  const createRes = await authorizedFetch(
+    'https://sheets.googleapis.com/v4/spreadsheets',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        properties: {
+          title: title || `Irish B2B Verified Leads - ${new Date().toLocaleDateString('en-IE')}`,
+        },
+      }),
     },
-    body: JSON.stringify({
-      properties: {
-        title: title || `Irish B2B Verified Leads - ${new Date().toLocaleDateString('en-IE')}`,
-      },
-    }),
-  });
+    accessToken
+  );
 
   if (!createRes.ok) {
     const err = await createRes.json().catch(() => ({}));
@@ -51,63 +139,21 @@ export async function exportLeadsToGoogleSheets(
   const spreadsheetUrl = sheetData.spreadsheetUrl;
 
   // 2. Prepare Rows Data
-  const headers = [
-    'CRO Reg #',
-    'Business Name',
-    'County',
-    'Official Website URL',
-    'Decision Maker Name',
-    'Decision Maker Role',
-    'LinkedIn URL',
-    'LinkedIn Type',
-    'Industry / Sector',
-    'Company Overview',
-    'Phone',
-    'Contact Email',
-    'Lead Verification Status',
-    'Confidence Score',
-    'Match Type',
-    'Process Status',
-    'Research Notes',
-    'Processed At',
-  ];
-
-  const rows = records.map((r) => [
-    r.companyNumber || '',
-    r.companyName || '',
-    r.county || '',
-    r.official_website_url || 'N/A',
-    r.decisionMakerName || 'N/A',
-    r.decisionMakerRole || 'N/A',
-    r.linkedinUrl || 'N/A',
-    r.linkedinType === 'DECISION_MAKER' ? 'Decision Maker Profile' : r.linkedinType === 'COMPANY' ? 'Company LinkedIn Page' : 'Not Found',
-    r.industry || 'N/A',
-    r.companySummary || 'N/A',
-    r.phoneNumber || 'N/A',
-    r.contactEmail || 'N/A',
-    r.verificationStatus || 'UNPROCESSED',
-    r.confidence_score || 'NONE',
-    r.match_type || 'UNPROCESSED',
-    r.status || 'PENDING',
-    r.notes || '',
-    r.processedAt ? new Date(r.processedAt).toLocaleString('en-IE') : '',
-  ]);
-
+  const headers = SHEET_HEADERS;
+  const rows = buildSheetRows(records);
   const valueData = [headers, ...rows];
 
   // 3. Append Data to Sheet1
-  const updateRes = await fetch(
+  const updateRes = await authorizedFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:R${valueData.length}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         values: valueData,
       }),
-    }
+    },
+    accessToken
   );
 
   if (!updateRes.ok) {
@@ -131,9 +177,7 @@ export async function listUserGoogleSheets(accessToken: string): Promise<DriveFi
   const query = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime,webViewLink)&pageSize=30&orderBy=modifiedTime desc`;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const res = await authorizedFetch(url, {}, accessToken);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -153,9 +197,7 @@ export async function importLeadsFromGoogleSheet(
 ): Promise<{ records: CompanyRecord[]; autoCorrections: string[] }> {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/A1:Z500`;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const res = await authorizedFetch(url, {}, accessToken);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

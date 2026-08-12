@@ -1,89 +1,129 @@
 import React from 'react';
 import { SummaryStats } from '../types';
-import { Building2, Globe, Facebook, SearchX, CheckCircle2, TrendingUp } from 'lucide-react';
+import { Building2, Globe, Facebook, SearchX, TrendingUp } from 'lucide-react';
 
 interface StatsCardsProps {
   stats: SummaryStats;
 }
 
-export const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
-  const completionPercentage = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
+const GAUGE_RADIUS = 68;
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+
+const ReadoutTile: React.FC<{
+  label: string;
+  value: number;
+  sub: string;
+  icon: React.ReactNode;
+  tone: 'ash' | 'gold' | 'ember' | 'smoke';
+}> = ({ label, value, sub, icon, tone }) => {
+  const toneClass = {
+    ash: 'text-ash group-hover:text-white',
+    gold: 'text-gold group-hover:text-amber-300',
+    ember: 'text-ember group-hover:text-orange-400',
+    smoke: 'text-smoke group-hover:text-ash',
+  }[tone];
+
+  const borderHoverClass = {
+    ash: 'hover:border-ash/40 hover:shadow-ash/5',
+    gold: 'hover:border-gold/40 hover:shadow-gold/5',
+    ember: 'hover:border-ember/40 hover:shadow-ember/5',
+    smoke: 'hover:border-smoke/40 hover:shadow-smoke/5',
+  }[tone];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-      {/* Card 1: Total Companies */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-xs hover:border-slate-300 transition-all">
-        <div className="flex items-center justify-between text-slate-500 mb-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Companies</span>
-          <Building2 className="w-4 h-4 text-slate-400" />
-        </div>
-        <div className="text-2xl font-bold text-slate-900">{stats.total}</div>
-        <div className="text-xs text-slate-500 mt-0.5">Loaded in target batch</div>
+    <div className={`group bg-void/70 backdrop-blur-sm rounded-xl border border-char-light/80 px-4 py-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg ${borderHoverClass}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-smoke/90 font-body group-hover:text-ash/80 transition-colors">{label}</span>
+        <span className={`${toneClass} transition-transform duration-200 group-hover:scale-110`}>{icon}</span>
       </div>
+      <div className={`font-mono text-2xl font-bold tracking-tight ${toneClass} transition-colors`}>{value}</div>
+      <div className="text-[11px] text-smoke/80 font-body mt-1 group-hover:text-smoke transition-colors">{sub}</div>
+    </div>
+  );
+};
 
-      {/* Card 2: Processed Progress */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-xs hover:border-slate-300 transition-all">
-        <div className="flex items-center justify-between text-slate-500 mb-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Processed</span>
-          <CheckCircle2 className="w-4 h-4 text-blue-500" />
+export const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
+  const completionPercentage = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
+  const officialPct = stats.processed > 0 ? Math.round((stats.officialFound / stats.processed) * 100) : 0;
+  const dashOffset = GAUGE_CIRCUMFERENCE * (1 - completionPercentage / 100);
+
+  return (
+    <div className="bg-char/90 backdrop-blur-md rounded-2xl border border-char-light/90 p-5 sm:p-6 mb-6 shadow-xl relative overflow-hidden group">
+      {/* Background glow accent */}
+      <div className="absolute -top-24 -left-24 w-64 h-64 bg-ember/5 rounded-full blur-3xl pointer-events-none group-hover:bg-ember/10 transition-all duration-700" />
+      <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-gold/5 rounded-full blur-3xl pointer-events-none group-hover:bg-gold/10 transition-all duration-700" />
+
+      <div className="relative flex flex-col lg:flex-row items-center gap-6">
+        {/* Primary dial: Processed % */}
+        <div className="relative shrink-0 w-44 h-44 flex items-center justify-center">
+          <svg viewBox="0 0 160 160" className="w-44 h-44 -rotate-90 drop-shadow-md">
+            <defs>
+              <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="var(--color-ember)" />
+                <stop offset="100%" stopColor="var(--color-gold)" />
+              </linearGradient>
+            </defs>
+            <circle cx="80" cy="80" r={GAUGE_RADIUS} fill="none" stroke="var(--color-char-light)" strokeWidth="10" />
+            <circle
+              cx="80"
+              cy="80"
+              r={GAUGE_RADIUS}
+              fill="none"
+              stroke="url(#gaugeGradient)"
+              strokeWidth="10"
+              strokeLinecap="round"
+              strokeDasharray={GAUGE_CIRCUMFERENCE}
+              strokeDashoffset={dashOffset}
+              className="transition-all duration-700 ease-out"
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="font-display text-4xl font-bold tracking-tight text-ash drop-shadow">{completionPercentage}%</span>
+            <span className="text-[10px] uppercase font-semibold tracking-wider text-smoke font-body mt-0.5">Processed</span>
+            <span className="font-mono text-xs font-medium text-gold mt-1 bg-void/60 px-2 py-0.5 rounded-full border border-gold/20">
+              {stats.processed} / {stats.total}
+            </span>
+          </div>
         </div>
-        <div className="flex items-baseline justify-between">
-          <span className="text-2xl font-bold text-slate-900">{stats.processed}</span>
-          <span className="text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-            {completionPercentage}%
-          </span>
-        </div>
-        <div className="w-full bg-slate-100 h-1.5 rounded-full mt-1.5 overflow-hidden">
-          <div
-            className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-            style={{ width: `${completionPercentage}%` }}
+
+        {/* Secondary readout cluster */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full">
+          <ReadoutTile
+            label="Total Companies"
+            value={stats.total}
+            sub="Loaded in batch"
+            icon={<Building2 className="w-4 h-4" />}
+            tone="ash"
+          />
+          <ReadoutTile
+            label="Official Web"
+            value={stats.officialFound}
+            sub={`${officialPct}% of processed`}
+            icon={<Globe className="w-4 h-4" />}
+            tone="gold"
+          />
+          <ReadoutTile
+            label="FB Fallbacks"
+            value={stats.facebookFallback}
+            sub="Official FB page used"
+            icon={<Facebook className="w-4 h-4" />}
+            tone="ember"
+          />
+          <ReadoutTile
+            label="Not Found"
+            value={stats.notFound}
+            sub="Filtered directory links"
+            icon={<SearchX className="w-4 h-4" />}
+            tone="smoke"
+          />
+          <ReadoutTile
+            label="Remaining"
+            value={stats.remaining}
+            sub="Ready for batch run"
+            icon={<TrendingUp className="w-4 h-4" />}
+            tone="ash"
           />
         </div>
-      </div>
-
-      {/* Card 3: Official Websites Found */}
-      <div className="bg-emerald-50/50 rounded-xl border border-emerald-200 p-3.5 shadow-xs hover:border-emerald-300 transition-all">
-        <div className="flex items-center justify-between text-emerald-700 mb-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800">Official Web</span>
-          <Globe className="w-4 h-4 text-emerald-600" />
-        </div>
-        <div className="flex items-baseline justify-between">
-          <span className="text-2xl font-bold text-emerald-950">{stats.officialFound}</span>
-          <span className="text-xs font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded">
-            {stats.processed > 0 ? `${Math.round((stats.officialFound / stats.processed) * 100)}%` : '0%'}
-          </span>
-        </div>
-        <div className="text-xs text-emerald-700 mt-0.5">Verified company domain</div>
-      </div>
-
-      {/* Card 4: Facebook Fallbacks */}
-      <div className="bg-amber-50/50 rounded-xl border border-amber-200 p-3.5 shadow-xs hover:border-amber-300 transition-all">
-        <div className="flex items-center justify-between text-amber-700 mb-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-amber-800">FB Fallbacks</span>
-          <Facebook className="w-4 h-4 text-amber-600" />
-        </div>
-        <div className="text-2xl font-bold text-amber-950">{stats.facebookFallback}</div>
-        <div className="text-xs text-amber-700 mt-0.5">Official FB page used</div>
-      </div>
-
-      {/* Card 5: Directory Excluded / Not Found */}
-      <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-3.5 shadow-xs hover:border-slate-300 transition-all">
-        <div className="flex items-center justify-between text-slate-600 mb-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">Not Found</span>
-          <SearchX className="w-4 h-4 text-slate-400" />
-        </div>
-        <div className="text-2xl font-bold text-slate-800">{stats.notFound}</div>
-        <div className="text-xs text-slate-500 mt-0.5">Directory links filtered out</div>
-      </div>
-
-      {/* Card 6: Remaining */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-xs hover:border-slate-300 transition-all">
-        <div className="flex items-center justify-between text-slate-500 mb-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Remaining</span>
-          <TrendingUp className="w-4 h-4 text-indigo-500" />
-        </div>
-        <div className="text-2xl font-bold text-slate-900">{stats.remaining}</div>
-        <div className="text-xs text-slate-500 mt-0.5">Ready for batch run</div>
       </div>
     </div>
   );
