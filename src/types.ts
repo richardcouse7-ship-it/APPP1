@@ -13,38 +13,6 @@ export interface GroundingSource {
   url: string;
 }
 
-export type DeepContactRoleHint =
-  | 'OWNER'
-  | 'MANAGING_DIRECTOR'
-  | 'HR_MANAGER'
-  | 'GENERAL_CONTACT'
-  | 'OTHER';
-
-export interface DeepContact {
-  name: string | null;
-  role: string | null;
-  roleHint: DeepContactRoleHint;
-  email: string | null;
-  phone: string | null;
-  sourceUrl: string | null;
-  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-}
-
-// Result of a POST /api/extract-contacts call: contacts pulled directly off the
-// company's own site (contact/about/team pages), kept separate from the
-// Google-search-grounded fields above since it's a different data source.
-export interface DeepContactResult {
-  status: 'SUCCESS' | 'FAILED';
-  error?: string;
-  generalEmail: string | null;
-  generalPhone: string | null;
-  address: string | null;
-  contacts: DeepContact[];
-  pagesCrawled: string[];
-  notes: string | null;
-  extractedAt: string;
-}
-
 export interface CompanyRecord {
   id: string;
   companyNumber: string;
@@ -73,7 +41,6 @@ export interface CompanyRecord {
   estimatedSize?: string | null;
   icpRating?: number | null;
   reasonForPbsNeed?: string | null;
-  deepContacts?: DeepContactResult | null;
   // Raw incoming file data for exact column sequence preservation
   rawRowData?: Record<string, any>;
   originalHeaders?: string[];

@@ -346,8 +346,9 @@ Return ONLY a raw JSON object:
         config: {
           tools: [{ googleSearch: {} }],
           temperature: 0.1,
-          //
-          // Thinking level NONE eliminates latency overhead for fast grounding calls
+          // Minimal thinking eliminates latency overhead for fast grounding calls.
+          // Must be explicit: the API rejects an implicit/unset default here.
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         },
       }));
 
@@ -573,7 +574,7 @@ Do not search for or hallucinate any other data. If a website cannot be found, r
           contents: `${systemPrompt}\n\nBusinesses to sweep:\n${JSON.stringify(promptData, null, 2)}`,
           config: {
             temperature: 0.1,
-            //
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
             tools: [{ googleSearch: {} }],
             responseSchema: {
               type: Type.ARRAY,
