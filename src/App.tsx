@@ -147,7 +147,7 @@ export default function App() {
   });
 
   // AI Model Engine & Cost Optimization Settings
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
   const [useCache, setUseCache] = useState<boolean>(true);
 
   const [isRunningBatch, setIsRunningBatch] = useState<boolean>(false);
@@ -864,7 +864,7 @@ export default function App() {
               companyName: targetItem.companyName,
               county: targetItem.county,
               companyNumber: targetItem.companyNumber,
-              modelName: selectedModel || 'gemini-3.6-flash',
+              modelName: selectedModel || 'gemini-3.5-flash',
               forceRefresh: !useCache,
             }),
           });

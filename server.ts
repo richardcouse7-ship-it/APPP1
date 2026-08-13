@@ -162,7 +162,7 @@ async function enrichBusinessRecord(
   }
 
   console.log("Calling getGeminiClient"); const ai = getGeminiClient();
-  const targetModel = options.modelName || "gemini-2.5-flash";
+  const targetModel = options.modelName || "gemini-3.5-flash";
 
   const prompt = `You are an expert Irish B2B Lead Research Analyst and Web Intelligence Extraction Agent.
 
@@ -546,7 +546,7 @@ app.post("/api/pre-sweep", async (req, res) => {
 
     console.log("Calling getGeminiClient"); const ai = getGeminiClient();
     // Force Gemini for the Pre-Sweep because it requires Google Search Grounding
-    const targetModel = "gemini-2.5-flash-8b";
+    const targetModel = "gemini-3.5-flash-8b";
 
     // Split input list into small chunks for reliable Google Search Grounding website lookup
     const chunkSize = 3;

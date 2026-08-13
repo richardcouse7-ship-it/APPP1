@@ -75,8 +75,8 @@ export const BatchControls: React.FC<BatchControlsProps> = ({
   ];
 
   const modelOptions = [
-    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', speed: 'Ultra Fast', cost: 'Low Cost (Recommended)' },
-    { id: 'gemini-3.6-flash-8b', label: 'Gemini 3.6 Flash-8B', speed: 'Fastest', cost: 'Maximum Economy' },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', speed: 'Ultra Fast', cost: 'Low Cost (Recommended)' },
+    { id: 'gemini-3.5-flash-8b', label: 'Gemini 3.5 Flash-8B', speed: 'Fastest', cost: 'Maximum Economy' },
     { id: 'perplexity-sonar', label: 'Perplexity Sonar', speed: 'Live Web Search', cost: 'Perplexity Search' },
     { id: 'perplexity-sonar-pro', label: 'Perplexity Sonar Pro', speed: 'Deep Web Citation', cost: 'Advanced Perplexity' },
     { id: 'gpt-4o-mini', label: 'GPT-4o Mini (OpenAI)', speed: 'Very Fast', cost: 'Low Cost' },
