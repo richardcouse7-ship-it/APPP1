@@ -155,7 +155,6 @@ export default function App() {
   const [selectedCompanyModal, setSelectedCompanyModal] = useState<CompanyRecord | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean>(true);
   const [isReEnrichingSingle, setIsReEnrichingSingle] = useState<boolean>(false);
-  const [isDeepCrawlingContacts, setIsDeepCrawlingContacts] = useState<boolean>(false);
   const [rateLimitNotice, setRateLimitNotice] = useState<string | null>(null);
   const stopBatchRef = useRef<boolean>(false);
 
@@ -658,61 +657,6 @@ export default function App() {
       );
     } finally {
       setIsReEnrichingSingle(false);
-    }
-  };
-
-  // Deep-crawl a company's own site (contact/about/team pages) for verified contacts,
-  // as a separate data source from the Google-search-grounded fields above.
-  const handleDeepCrawlContacts = async (company: CompanyRecord) => {
-    if (!company.official_website_url) return;
-
-    setIsDeepCrawlingContacts(true);
-    try {
-      const res = await fetch('/api/extract-contacts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: company.official_website_url,
-          companyName: company.companyName,
-        }),
-      });
-
-      const data = await res.json();
-      const deepContacts = {
-        status: res.ok ? data.status : 'FAILED',
-        error: data.error,
-        generalEmail: data.generalEmail ?? null,
-        generalPhone: data.generalPhone ?? null,
-        address: data.address ?? null,
-        contacts: Array.isArray(data.contacts) ? data.contacts : [],
-        pagesCrawled: Array.isArray(data.pagesCrawled) ? data.pagesCrawled : [],
-        notes: data.notes ?? null,
-        extractedAt: new Date().toISOString(),
-      } as CompanyRecord['deepContacts'];
-
-      setRecords((prev) => prev.map((r) => (r.id === company.id ? { ...r, deepContacts } : r)));
-      if (selectedCompanyModal && selectedCompanyModal.id === company.id) {
-        setSelectedCompanyModal((prev) => (prev ? { ...prev, deepContacts } : null));
-      }
-    } catch (err: any) {
-      console.error(`Deep-crawl contacts failed for ${company.companyName}:`, err);
-      const deepContacts: CompanyRecord['deepContacts'] = {
-        status: 'FAILED',
-        error: err.message || 'Deep-crawl request failed.',
-        generalEmail: null,
-        generalPhone: null,
-        address: null,
-        contacts: [],
-        pagesCrawled: [],
-        notes: null,
-        extractedAt: new Date().toISOString(),
-      };
-      setRecords((prev) => prev.map((r) => (r.id === company.id ? { ...r, deepContacts } : r)));
-      if (selectedCompanyModal && selectedCompanyModal.id === company.id) {
-        setSelectedCompanyModal((prev) => (prev ? { ...prev, deepContacts } : null));
-      }
-    } finally {
-      setIsDeepCrawlingContacts(false);
     }
   };
 
@@ -1220,8 +1164,6 @@ export default function App() {
         onSaveManualUrl={handleSaveManualUrl}
         onReEnrichSingle={handleReEnrichSingle}
         isReEnriching={isReEnrichingSingle}
-        onDeepCrawlContacts={handleDeepCrawlContacts}
-        isDeepCrawlingContacts={isDeepCrawlingContacts}
       />
 
       {/* Duplicate Review & Cleanup Modal */}
