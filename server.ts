@@ -1,15 +1,19 @@
 import express from "express";
 import path from "path";
+import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
+import { contactExtractionRouter } from "./src/server/contactExtraction/route.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
+app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+app.use(contactExtractionRouter);
 
 // Server-Side In-Memory Cache to eliminate duplicate token spend
 const ENRICHMENT_CACHE = new Map<string, any>();
