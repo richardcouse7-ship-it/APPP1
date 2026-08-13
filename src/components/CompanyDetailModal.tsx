@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ExternalLink, Copy, Check, Globe, ShieldCheck, AlertCircle, Search, Edit3, Save, MapPin, Hash, Sparkles, UserCheck, Linkedin } from 'lucide-react';
+import { X, ExternalLink, Copy, Check, Globe, ShieldCheck, AlertCircle, Search, Edit3, Save, MapPin, Hash, Sparkles, UserCheck, Linkedin, Users, Mail, Phone } from 'lucide-react';
 import { CompanyRecord } from '../types';
 
 interface CompanyDetailModalProps {
@@ -8,7 +8,17 @@ interface CompanyDetailModalProps {
   onSaveManualUrl: (id: string, newUrl: string) => void;
   onReEnrichSingle: (company: CompanyRecord) => void;
   isReEnriching: boolean;
+  onDeepCrawlContacts: (company: CompanyRecord) => void;
+  isDeepCrawlingContacts: boolean;
 }
+
+const ROLE_HINT_LABELS: Record<string, string> = {
+  OWNER: 'Owner',
+  MANAGING_DIRECTOR: 'Managing Director / CEO',
+  HR_MANAGER: 'HR Manager',
+  GENERAL_CONTACT: 'General Contact',
+  OTHER: 'Other',
+};
 
 export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
   company,
@@ -16,6 +26,8 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
   onSaveManualUrl,
   onReEnrichSingle,
   isReEnriching,
+  onDeepCrawlContacts,
+  isDeepCrawlingContacts,
 }) => {
   if (!company) return null;
 
@@ -227,6 +239,97 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
               )}
             </div>
           )}
+
+          {/* Deep-Crawl Site Contacts (POST /api/extract-contacts) — separate data source
+              pulled directly off the company's own site, not overwritten into the
+              Google-search-grounded fields above. */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-indigo-600" /> Verified Site Contacts
+              </h4>
+              <button
+                onClick={() => onDeepCrawlContacts(company)}
+                disabled={isDeepCrawlingContacts || !company.official_website_url}
+                title={!company.official_website_url ? 'Requires an official website URL' : undefined}
+                className="px-2.5 py-1.5 text-xs font-bold text-indigo-800 bg-indigo-100 hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg border border-indigo-300 transition-colors inline-flex items-center gap-1.5"
+              >
+                <Search className="w-3.5 h-3.5 text-indigo-600" />
+                {isDeepCrawlingContacts ? 'Crawling Site...' : 'Deep-Crawl Site Contacts'}
+              </button>
+            </div>
+
+            {!company.deepContacts && (
+              <p className="text-xs italic text-slate-400">
+                Not run yet. This crawls the company's own homepage, contact, about, and team pages
+                and extracts names, roles, emails, and phone numbers directly from the site.
+              </p>
+            )}
+
+            {company.deepContacts?.status === 'FAILED' && (
+              <p className="text-xs text-red-700 flex items-start gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                {company.deepContacts.error || 'Deep-crawl failed.'}
+              </p>
+            )}
+
+            {company.deepContacts?.status === 'SUCCESS' && (
+              <div className="space-y-3">
+                {(company.deepContacts.generalEmail || company.deepContacts.generalPhone || company.deepContacts.address) && (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {company.deepContacts.generalEmail && (
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="font-mono text-slate-800 truncate">{company.deepContacts.generalEmail}</span>
+                      </div>
+                    )}
+                    {company.deepContacts.generalPhone && (
+                      <div className="flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="font-mono text-slate-800">{company.deepContacts.generalPhone}</span>
+                      </div>
+                    )}
+                    {company.deepContacts.address && (
+                      <div className="col-span-2 flex items-start gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                        <span className="text-slate-700">{company.deepContacts.address}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {company.deepContacts.contacts.length > 0 ? (
+                  <div className="space-y-2">
+                    {company.deepContacts.contacts.map((contact, idx) => (
+                      <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900">{contact.name || 'Unnamed contact'}</span>
+                          <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+                            {ROLE_HINT_LABELS[contact.roleHint] || contact.roleHint}
+                          </span>
+                        </div>
+                        {contact.role && <p className="text-slate-600 mt-0.5">{contact.role}</p>}
+                        <div className="flex flex-wrap gap-x-3 mt-1 text-slate-500 font-mono">
+                          {contact.email && <span>{contact.email}</span>}
+                          {contact.phone && <span>{contact.phone}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs italic text-slate-400">
+                    {company.deepContacts.notes || 'No named contacts found on the crawled pages.'}
+                  </p>
+                )}
+
+                {company.deepContacts.pagesCrawled.length > 0 && (
+                  <p className="text-[10px] text-slate-400">
+                    Crawled {company.deepContacts.pagesCrawled.length} page(s) at {new Date(company.deepContacts.extractedAt).toLocaleString('en-IE')}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
