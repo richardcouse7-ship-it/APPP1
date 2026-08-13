@@ -12,6 +12,7 @@ import { ColumnMappingModal } from './components/ColumnMappingModal';
 import { VoiceAssistantModal } from './components/VoiceAssistantModal';
 import { AiIntelligenceModal } from './components/AiIntelligenceModal';
 import { GoogleMapsGroundingModal } from './components/GoogleMapsGroundingModal';
+import { WebsiteSweepModal } from './components/WebsiteSweepModal';
 import { CompanyRecord, SummaryStats } from './types';
 import { SAMPLE_IRISH_COMPANIES } from './data/sampleCompanies';
 import { analyzeDuplicates, deduplicateDataset } from './utils/duplicateUtils';
@@ -42,6 +43,7 @@ export default function App() {
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState<boolean>(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
   const [isMapsModalOpen, setIsMapsModalOpen] = useState<boolean>(false);
+  const [isWebsiteSweepModalOpen, setIsWebsiteSweepModalOpen] = useState<boolean>(false);
 
   // Active view tab in UI: 'FINAL_TABLE' | 'STAGING_VAULT'
   const [activeTab, setActiveTab] = useState<'FINAL_TABLE' | 'STAGING_VAULT'>('FINAL_TABLE');
@@ -128,6 +130,22 @@ export default function App() {
     return 1.2;
   });
 
+  // Concurrency Speed Mode: 1x (Sequential), 3x (Fast Parallel), 5x (Turbo Parallel)
+  const [concurrency, setConcurrency] = useState<number>(() => {
+    try {
+      const savedSettings = localStorage.getItem(SETTINGS_KEY);
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        if (typeof parsed.concurrency === 'number' && [1, 3, 5].includes(parsed.concurrency)) {
+          return parsed.concurrency;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load concurrency setting from localStorage', e);
+    }
+    return 3; // Default 3x Fast parallel
+  });
+
   // AI Model Engine & Cost Optimization Settings
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
   const [useCache, setUseCache] = useState<boolean>(true);
@@ -139,6 +157,24 @@ export default function App() {
   const [isReEnrichingSingle, setIsReEnrichingSingle] = useState<boolean>(false);
   const [rateLimitNotice, setRateLimitNotice] = useState<string | null>(null);
   const stopBatchRef = useRef<boolean>(false);
+
+  // Perpetual Continuous Enrichment Engine States
+  const [isPerpetualActive, setIsPerpetualActive] = useState<boolean>(false);
+  const [perpetualStatus, setPerpetualStatus] = useState<'IDLE' | 'RUNNING' | 'COOLING_DOWN' | 'WAITING_FOR_LEADS'>('IDLE');
+  const [perpetualCooldownSeconds, setPerpetualCooldownSeconds] = useState<number>(0);
+  const [perpetualSessionCount, setPerpetualSessionCount] = useState<number>(0);
+  const stopPerpetualRef = useRef<boolean>(false);
+
+  // Live refs for perpetual loop to avoid closure staleness
+  const recordsRef = useRef<CompanyRecord[]>([]);
+  useEffect(() => {
+    recordsRef.current = records;
+  }, [records]);
+
+  const stagedLeadsRef = useRef<CompanyRecord[]>([]);
+  useEffect(() => {
+    stagedLeadsRef.current = stagedLeads;
+  }, [stagedLeads]);
 
   // Google Workspace Auth State
   const [user, setUser] = useState<User | null>(null);
@@ -208,7 +244,9 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      console.error('Google Sign-In failed:', err);
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        console.error('Google Sign-In failed:', err);
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -244,14 +282,14 @@ export default function App() {
     }
   }, [records, stagedLeads, deletedRecordIds, user]);
 
-  // Auto-save batch settings (batchSize, requestDelay) to localStorage on every setting change
+  // Auto-save batch settings (batchSize, requestDelay, concurrency) to localStorage on every setting change
   useEffect(() => {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ batchSize, requestDelay }));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ batchSize, requestDelay, concurrency }));
     } catch (e) {
       console.error('Failed to auto-save batch settings to localStorage', e);
     }
-  }, [batchSize, requestDelay]);
+  }, [batchSize, requestDelay, concurrency]);
 
   // Check health status on mount
   useEffect(() => {
@@ -483,6 +521,25 @@ export default function App() {
     }
   };
 
+  // Unscreened and Disqualified counts for pre-sweep triage
+  const unscreenedCount = useMemo(() => {
+    return records.filter((r) => !r.sweepStatus || r.sweepStatus === 'UNSCREENED').length;
+  }, [records]);
+
+  const disqualifiedCount = useMemo(() => {
+    return records.filter((r) => r.sweepStatus === 'SWEPT_NOT_FOUND' && !r.official_website_url).length;
+  }, [records]);
+
+  // Move useless / disqualified leads into Staging Vault to protect main table & save API credits
+  const handleAutoVaultDisqualified = (disqualifiedIds: string[]) => {
+    const idsSet = new Set(disqualifiedIds);
+    const uselessItems = records.filter((r) => idsSet.has(r.id));
+    const activeItems = records.filter((r) => !idsSet.has(r.id));
+
+    setStagedLeads((prev) => [...uselessItems, ...prev]);
+    setRecords(activeItems);
+  };
+
   // Re-queue specific records back to PENDING
   const handleResetRecordStatus = (idsToReset: string[]) => {
     setRecords((prev) =>
@@ -574,6 +631,9 @@ export default function App() {
         linkedinType: data.linkedinType,
         phoneNumber: data.phoneNumber,
         contactEmail: data.contactEmail,
+        estimatedSize: data.estimatedSize,
+        icpRating: data.icpRating,
+        reasonForPbsNeed: data.reasonForPbsNeed,
         verificationStatus: data.verificationStatus,
         confidence_score: data.confidence_score,
         match_type: data.match_type,
@@ -600,7 +660,7 @@ export default function App() {
     }
   };
 
-  // Run Batch Enrichment process with pacing delay and rate limit resilience
+  // Run Batch Enrichment process with parallel worker streams & rate limit resilience
   const runBatchEnrichment = async () => {
     if (isRunningBatch) return;
 
@@ -611,18 +671,20 @@ export default function App() {
       handlePromoteAndEnrichStagedLeads(stagedLeads);
     }
 
-    // Filter strictly PENDING records (deduplication guarantee)
-    const pendingRecords = records.filter((r) => r.status === 'PENDING');
+    // Filter strictly PENDING records that are NOT DISQUALIFIED (save credits on useless leads)
+    const pendingRecords = records.filter(
+      (r) => r.status === 'PENDING' && r.sweepStatus !== 'SWEPT_NOT_FOUND'
+    );
     if (pendingRecords.length === 0) return;
 
     const itemsToProcess = pendingRecords.slice(0, batchSize);
     setIsRunningBatch(true);
     stopBatchRef.current = false;
 
-    for (let i = 0; i < itemsToProcess.length; i++) {
-      if (stopBatchRef.current) break;
+    // Worker logic for a single company item
+    const enrichItem = async (targetItem: CompanyRecord) => {
+      if (stopBatchRef.current) return;
 
-      const targetItem = itemsToProcess[i];
       setCurrentActiveCompany(targetItem);
 
       // Mark row as processing in UI
@@ -645,11 +707,12 @@ export default function App() {
         });
 
         if (res.status === 429) {
-          setRateLimitNotice('Gemini API rate limit reached. Pausing batch to let quota refresh. You can click "Run Batch Enrichment" again in a few seconds.');
+          setRateLimitNotice('Gemini API rate limit reached. Pausing batch to let quota refresh.');
           setRecords((prev) =>
             prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PENDING' } : r))
           );
-          break;
+          stopBatchRef.current = true;
+          return;
         }
 
         if (!res.ok) {
@@ -659,7 +722,8 @@ export default function App() {
             setRecords((prev) =>
               prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PENDING' } : r))
             );
-            break;
+            stopBatchRef.current = true;
+            return;
           }
           throw new Error(errData.error || `API error ${res.status}`);
         }
@@ -681,6 +745,9 @@ export default function App() {
                 linkedinType: data.linkedinType,
                 phoneNumber: data.phoneNumber,
                 contactEmail: data.contactEmail,
+                estimatedSize: data.estimatedSize,
+                icpRating: data.icpRating,
+                reasonForPbsNeed: data.reasonForPbsNeed,
                 verificationStatus: data.verificationStatus,
                 confidence_score: data.confidence_score,
                 match_type: data.match_type,
@@ -709,8 +776,17 @@ export default function App() {
           )
         );
       }
+    };
 
-      if (i < itemsToProcess.length - 1 && !stopBatchRef.current) {
+    // Parallel Chunk Worker Execution according to selected concurrency
+    const activeConcurrency = Math.max(1, concurrency || 1);
+    for (let i = 0; i < itemsToProcess.length; i += activeConcurrency) {
+      if (stopBatchRef.current) break;
+
+      const chunk = itemsToProcess.slice(i, i + activeConcurrency);
+      await Promise.all(chunk.map((item) => enrichItem(item)));
+
+      if (i + activeConcurrency < itemsToProcess.length && !stopBatchRef.current && requestDelay > 0) {
         await new Promise((resolve) => setTimeout(resolve, requestDelay * 1000));
       }
     }
@@ -722,6 +798,164 @@ export default function App() {
   const handleStopBatch = () => {
     stopBatchRef.current = true;
   };
+
+  // Toggle Perpetual Enrichment Engine
+  const handleTogglePerpetual = () => {
+    if (isPerpetualActive) {
+      stopPerpetualRef.current = true;
+      setIsPerpetualActive(false);
+      setPerpetualStatus('IDLE');
+    } else {
+      stopPerpetualRef.current = false;
+      setIsPerpetualActive(true);
+      setPerpetualStatus('RUNNING');
+    }
+  };
+
+  // Continuous Perpetual Enrichment Engine Loop
+  useEffect(() => {
+    if (!isPerpetualActive) {
+      stopPerpetualRef.current = true;
+      return;
+    }
+
+    stopPerpetualRef.current = false;
+    let isSubscribed = true;
+
+    const runPerpetualLoop = async () => {
+      while (isSubscribed && !stopPerpetualRef.current) {
+        // Find next pending items using live ref
+        let pending = recordsRef.current.filter(
+          (r) => r.status === 'PENDING' && r.sweepStatus !== 'SWEPT_NOT_FOUND'
+        );
+
+        // Auto-promote staged leads if main records pending list is empty
+        if (pending.length === 0 && stagedLeadsRef.current.length > 0) {
+          handlePromoteAndEnrichStagedLeads(stagedLeadsRef.current);
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+
+        // If no pending items left anywhere, set status to WAITING_FOR_LEADS and wait 8s
+        if (pending.length === 0) {
+          setPerpetualStatus('WAITING_FOR_LEADS');
+          setCurrentActiveCompany(null);
+          await new Promise((r) => setTimeout(r, 8000));
+          continue;
+        }
+
+        setPerpetualStatus('RUNNING');
+        const targetItem = pending[0];
+        setCurrentActiveCompany(targetItem);
+
+        // Mark processing
+        setRecords((prev) =>
+          prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PROCESSING' } : r))
+        );
+
+        let hitRateLimit = false;
+
+        try {
+          const res = await fetch('/api/enrich-single', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: targetItem.id,
+              companyName: targetItem.companyName,
+              county: targetItem.county,
+              companyNumber: targetItem.companyNumber,
+              modelName: selectedModel || 'gemini-3.6-flash',
+              forceRefresh: !useCache,
+            }),
+          });
+
+          if (res.status === 429) {
+            hitRateLimit = true;
+          } else if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            if (errData.error?.includes('rate limit') || errData.error?.includes('quota')) {
+              hitRateLimit = true;
+            } else {
+              throw new Error(errData.error || `API error ${res.status}`);
+            }
+          } else {
+            const data = await res.json();
+            setRecords((prev) =>
+              prev.map((r) =>
+                r.id === targetItem.id
+                  ? {
+                      ...r,
+                      status: 'SUCCESS',
+                      official_website_url: data.official_website_url,
+                      industry: data.industry,
+                      companySummary: data.companySummary,
+                      decisionMakerName: data.decisionMakerName,
+                      decisionMakerRole: data.decisionMakerRole,
+                      linkedinUrl: data.linkedinUrl,
+                      linkedinType: data.linkedinType,
+                      phoneNumber: data.phoneNumber,
+                      contactEmail: data.contactEmail,
+                      verificationStatus: data.verificationStatus,
+                      confidence_score: data.confidence_score,
+                      match_type: data.match_type,
+                      notes: data.notes,
+                      grounding_sources: data.grounding_sources,
+                      processedAt: new Date().toISOString(),
+                    }
+                  : r
+              )
+            );
+            setPerpetualSessionCount((prev) => prev + 1);
+          }
+        } catch (err: any) {
+          console.error(`Perpetual engine error for ${targetItem.companyName}:`, err);
+          setRecords((prev) =>
+            prev.map((r) =>
+              r.id === targetItem.id
+                ? {
+                    ...r,
+                    status: 'FAILED',
+                    official_website_url: null,
+                    confidence_score: 'LOW',
+                    match_type: 'NOT_FOUND',
+                    notes: `Perpetual error: ${err.message}`,
+                  }
+                : r
+            )
+          );
+        }
+
+        if (hitRateLimit) {
+          setRecords((prev) =>
+            prev.map((r) => (r.id === targetItem.id ? { ...r, status: 'PENDING' } : r))
+          );
+          setPerpetualStatus('COOLING_DOWN');
+
+          for (let cd = 20; cd > 0; cd--) {
+            if (stopPerpetualRef.current || !isSubscribed) break;
+            setPerpetualCooldownSeconds(cd);
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+          setPerpetualCooldownSeconds(0);
+          setPerpetualStatus('RUNNING');
+        } else {
+          // Gentle pace delay (default 2s or requestDelay)
+          const paceDelay = Math.max(1.5, requestDelay || 2);
+          await new Promise((r) => setTimeout(r, paceDelay * 1000));
+        }
+      }
+
+      setPerpetualStatus('IDLE');
+      setCurrentActiveCompany(null);
+    };
+
+    runPerpetualLoop();
+
+    return () => {
+      isSubscribed = false;
+      stopPerpetualRef.current = true;
+    };
+  }, [isPerpetualActive, selectedModel, useCache, requestDelay]);
 
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 font-sans antialiased selection:bg-emerald-500 selection:text-white">
@@ -832,18 +1066,28 @@ export default function App() {
           onBatchSizeChange={setBatchSize}
           requestDelay={requestDelay}
           onRequestDelayChange={setRequestDelay}
+          concurrency={concurrency}
+          onConcurrencyChange={setConcurrency}
           selectedModel={selectedModel}
           onModelChange={setSelectedModel}
           useCache={useCache}
           onToggleCache={setUseCache}
           onRunBatch={runBatchEnrichment}
           onStopBatch={handleStopBatch}
+          onOpenPreSweep={() => setIsWebsiteSweepModalOpen(true)}
+          unscreenedCount={unscreenedCount}
+          disqualifiedCount={disqualifiedCount}
           isRunning={isRunningBatch}
           totalPending={stats.remaining + stagedLeads.length}
           totalProcessed={stats.processed}
           totalRecords={stats.total + stagedLeads.length}
           currentActiveRowName={currentActiveCompany?.companyName}
           processedInCurrentSession={stats.processed}
+          isPerpetualActive={isPerpetualActive}
+          onTogglePerpetual={handleTogglePerpetual}
+          perpetualStatus={perpetualStatus}
+          perpetualCooldownSeconds={perpetualCooldownSeconds}
+          perpetualSessionCount={perpetualSessionCount}
         />
 
         {/* Tier 1 vs Tier 2 Dataset Navigation Tabs */}
@@ -987,6 +1231,14 @@ export default function App() {
             ...prev,
           ]);
         }}
+      />
+      {/* High-Speed Website Sweep Lead Triage Modal */}
+      <WebsiteSweepModal
+        isOpen={isWebsiteSweepModalOpen}
+        onClose={() => setIsWebsiteSweepModalOpen(false)}
+        records={records}
+        onUpdateRecords={setRecords}
+        onAutoVaultDisqualified={handleAutoVaultDisqualified}
       />
     </div>
   );

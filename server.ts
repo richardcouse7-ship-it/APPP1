@@ -1,19 +1,15 @@
 import express from "express";
 import path from "path";
-import cors from "cors";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { contactExtractionRouter } from "./src/server/contactExtraction/route.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
-app.use(cors());
 app.use(express.json({ limit: "10mb" }));
-app.use(contactExtractionRouter);
 
 // Server-Side In-Memory Cache to eliminate duplicate token spend
 const ENRICHMENT_CACHE = new Map<string, any>();
@@ -55,9 +51,97 @@ const BANNED_DIRECTORIES = [
   "youtube.com",
 ];
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function callGeminiWithRetry(apiCall: () => Promise<any>, maxRetries = 4) {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      return await apiCall();
+    } catch (error: any) {
+      if (error.status === 429 || error.message?.includes('429')) {
+        attempt++;
+        if (attempt >= maxRetries) throw error;
+        // Exponential backoff: 2s, 4s, 8s, 16s + jitter
+        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+        console.warn(`[Gemini API] 429 Rate Limit Hit. Retrying in ${Math.round(delay / 1000)}s (Attempt ${attempt}/${maxRetries})...`);
+        await sleep(delay);
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
 interface EnrichOptions {
   modelName?: string;
   forceRefresh?: boolean;
+  websiteUrl?: string | null;
+  websiteText?: string | null;
+}
+
+async function scrapeWebsiteText(url: string | null | undefined): Promise<string | null> {
+  if (!url) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 second timeout for deep scrape
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    
+    if (!response.ok) {
+      clearTimeout(timeoutId);
+      return null;
+    }
+    const html = await response.text();
+    let combinedText = `[HOMEPAGE]\n${html}`;
+
+    // Regex to find links that look like contact or about pages
+    const linkRegex = /<a\s+(?:[^>]*?\s+)?href=["']([^"']*(?:contact|about|team)[^"']*)["']/gi;
+    let match;
+    const additionalUrls = new Set<string>();
+    while ((match = linkRegex.exec(html)) !== null && additionalUrls.size < 2) {
+      let href = match[1];
+      if (href.startsWith('mailto:') || href.startsWith('tel:')) continue;
+      
+      try {
+        const absoluteUrl = new URL(href, url).href;
+        additionalUrls.add(absoluteUrl);
+      } catch (e) {
+        // ignore invalid urls
+      }
+    }
+
+    for (const subUrl of additionalUrls) {
+      try {
+        const subRes = await fetch(subUrl, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        if (subRes.ok) {
+          const subHtml = await subRes.text();
+          combinedText += `\n\n[PAGE: ${subUrl}]\n${subHtml}`;
+        }
+      } catch (subErr) {
+        // skip if sub-page fails
+      }
+    }
+    clearTimeout(timeoutId);
+
+    // Very basic regex to strip HTML tags and scripts/styles
+    const cleanText = combinedText
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // Return first 20000 chars to avoid token limits but get enough context
+    return cleanText.substring(0, 20000);
+  } catch (err) {
+    console.warn(`[Scrape Warning] Failed to fetch ${url}:`, (err as any).message);
+    return null;
+  }
 }
 
 async function enrichBusinessRecord(
@@ -77,8 +161,8 @@ async function enrichBusinessRecord(
     };
   }
 
-  const ai = getGeminiClient();
-  const targetModel = options.modelName || "gemini-3.6-flash";
+  console.log("Calling getGeminiClient"); const ai = getGeminiClient();
+  const targetModel = options.modelName || "gemini-2.5-flash";
 
   const prompt = `You are an expert Irish B2B Lead Research Analyst and Web Intelligence Extraction Agent.
 
@@ -87,12 +171,12 @@ For this Irish business:
 Business Name: "${companyName}"
 County/Location: "${county}"
 ${companyNumber ? `CRO Registration Number: "${companyNumber}"` : ""}
+${options.websiteUrl ? `Official Website URL (from previous sweep): "${options.websiteUrl}"` : ""}
 
-1. FIND OFFICIAL WEBSITE: Search for and identify the official, primary website domain URL.
-   - EXCLUDE directories (goldenpages.ie, solocheck.ie, vision-net.ie, rip.ie, yelp.ie, tripadvisor, google maps links).
-   - EXCLUDE social media platforms UNLESS no official domain exists AND an active official Facebook page exists for this business in County ${county}.
+${options.websiteText ? `=== RAW WEBSITE TEXT FROM HOMEPAGE ===\n${options.websiteText}\n====================================\n\nCRITICAL: Analyze the website text provided above to accurately extract the Contact Email, Phone Number, Decision Maker Name/Role, and Company Size.` : ""}
 
-2. CONDUCT B2B LEAD RESEARCH & WEBSITE VERIFICATION:
+1. CONDUCT B2B LEAD RESEARCH & WEBSITE VERIFICATION (focusing on contact and DM info):
+   - Official Website URL: ${options.websiteUrl ? `Use "${options.websiteUrl}" if valid, otherwise find it.` : `Search for and identify the official, primary website domain URL. If they do not have one, you MAY return a directory link (goldenpages.ie, solocheck.ie, localbusinesspages.ie, etc.) or a Facebook/social media page.`}
    - Industry / Sector: Determine business sector (e.g. Dairy & Agriculture, Food & Beverage, Construction, Software & Tech, Retail, Logistics).
    - Company Summary: Write a concise 1-2 sentence overview of what the company does based on their website or web footprint.
    - Key Decision Maker (DM): Identify CEO, Managing Director, Founder, Owner, or top executive (Full Name e.g. "John Murphy").
@@ -103,7 +187,16 @@ ${companyNumber ? `CRO Registration Number: "${companyNumber}"` : ""}
      3. If neither can be found, set "linkedin_url" to null and "linkedin_type" to "NOT_FOUND".
    - Primary Company Phone: Main general office/reception phone number if publicly listed. Do NOT search for personal direct-dial phone numbers for the Decision Maker.
    - Company Contact Email: Main public info/sales email (e.g. info@domain.ie) if publicly listed. Do NOT search for direct personal email addresses for the Decision Maker.
-   - Verification Status: "VERIFIED_ACTIVE" if official site confirmed, "VERIFIED_FACEBOOK" if FB page used, or "UNVERIFIED".
+   - Verification Status: "VERIFIED_ACTIVE" if official site confirmed, "VERIFIED_FACEBOOK" if FB page used, "VERIFIED_LINKEDIN" if LinkedIn used, or "UNVERIFIED".
+   - Estimated Company Size: Estimate employee headcount scale (e.g. "1-10", "10-50", "50-250", "250+").
+   - Peninsula Business Services (PBS) Assessment: Note: PBS stands for Peninsula Business Services (HR, Employment Law, Health & Safety).
+     - ICP Rating /100: You MUST calculate this using this strict mathematical rubric:
+       - Base Score: Start at 40.
+       - If Size is 1-10: +10. If 10-50: +30. If 50+: +40.
+       - If Industry is High Risk (Construction, Manufacturing, Agriculture, Healthcare, Hospitality, Logistics): +20.
+       - If Industry is Low Risk (Tech, Consulting, Admin): +5.
+       - If business is a Sole Trader / individual: -40.
+     - Reason for PBS Need: 1 concise sentence explaining why this employer needs Peninsula Business Services.
 
 STRICT OUTPUT FORMAT:
 Return ONLY a raw JSON object:
@@ -119,6 +212,9 @@ Return ONLY a raw JSON object:
   "linkedin_type": "DECISION_MAKER" | "COMPANY" | "NOT_FOUND",
   "phone_number": "<PUBLIC_PHONE_OR_NULL>",
   "contact_email": "<PUBLIC_EMAIL_OR_NULL>",
+  "estimated_size": "<ESTIMATED_EMPLOYEE_COUNT_OR_NULL>",
+  "icp_rating": <NUMBER_0_TO_100_OR_NULL>,
+  "reason_for_pbs_need": "<1_SENTENCE_PBS_HR_SAFETY_REASON_OR_NULL>",
   "verification_status": "VERIFIED_ACTIVE" | "VERIFIED_FACEBOOK" | "UNVERIFIED",
   "confidence_score": "HIGH" | "MEDIUM" | "LOW",
   "match_type": "OFFICIAL_WEBSITE" | "FACEBOOK_FALLBACK" | "NOT_FOUND",
@@ -169,43 +265,100 @@ Return ONLY a raw JSON object:
     if (Array.isArray(perpData.citations)) {
       sources = perpData.citations.map((url: string) => ({ title: url, url }));
     }
+  } else if (targetModel.startsWith("gpt-")) {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) {
+      throw new Error("OPENAI_API_KEY environment variable is required to use OpenAI models. Please set it in Settings.");
+    }
+
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${openaiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert Irish B2B Lead Research Analyst. Respond strictly in raw JSON.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.1,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`OpenAI API Error (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    responseText = data.choices?.[0]?.message?.content || "";
+  } else if (targetModel.startsWith("claude-")) {
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicKey) {
+      throw new Error("ANTHROPIC_API_KEY environment variable is required to use Claude models. Please set it in Settings.");
+    }
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        max_tokens: 2000,
+        system: "You are an expert Irish B2B Lead Research Analyst. Respond strictly in raw JSON without markdown blocks.",
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.1,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Anthropic API Error (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    responseText = data.content?.[0]?.text || "";
   } else {
     // Gemini API Request with Exponential Backoff
-    const ai = getGeminiClient();
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
-          model: targetModel,
-          contents: prompt,
-          config: {
-            tools: [{ googleSearch: {} }],
-            temperature: 0.1,
-            responseMimeType: "application/json",
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          },
-        });
+    console.log("Calling getGeminiClient"); const ai = getGeminiClient();
+    
+    try {
+      console.log("Calling callGeminiWithRetry with targetModel:", targetModel); const response = await callGeminiWithRetry(() => ai.models.generateContent({
+        model: targetModel,
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          temperature: 0.1,
+          //
+          // Thinking level NONE eliminates latency overhead for fast grounding calls
+        },
+      }));
 
-        responseText = response.text || "";
-        const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-        sources = groundingChunks
-          .map((chunk: any) => chunk.web)
-          .filter((web: any) => web && web.uri)
-          .map((web: any) => ({ title: web.title || web.uri, url: web.uri }));
-        
-        break; // Success
-      } catch (err: any) {
-        const isRateLimit = err.status === 429 || err.message?.includes("429") || err.message?.includes("RESOURCE_EXHAUSTED");
-        if (isRateLimit && attempt < maxRetries) {
-          console.warn(`Rate limit hit (attempt ${attempt}/${maxRetries}). Retrying in ${delayMs}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          delayMs *= 2; // Exponential backoff
-        } else {
-          if (isRateLimit) {
-            throw new Error("Gemini API rate limit exceeded. Please wait a few seconds before retrying.");
-          }
-          throw err;
-        }
-      }
+      console.log("Got response"); responseText = response.text || "";
+      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      sources = groundingChunks
+        .map((chunk: any) => chunk.web)
+        .filter((web: any) => web && web.uri)
+        .map((web: any) => ({ title: web.title || web.uri, url: web.uri }));
+    } catch (err: any) {
+      throw err;
     }
   }
 
@@ -267,6 +420,9 @@ Return ONLY a raw JSON object:
     linkedinType: resultJson?.linkedin_type || (resultJson?.linkedin_url ? (resultJson.linkedin_url.includes('/in/') ? 'DECISION_MAKER' : 'COMPANY') : 'NOT_FOUND'),
     phoneNumber: resultJson?.phone_number || null,
     contactEmail: resultJson?.contact_email || null,
+    estimatedSize: resultJson?.estimated_size || null,
+    icpRating: typeof resultJson?.icp_rating === 'number' ? resultJson.icp_rating : (resultJson?.icp_rating ? parseInt(resultJson.icp_rating) : null),
+    reasonForPbsNeed: resultJson?.reason_for_pbs_need || null,
     verificationStatus: resultJson?.verification_status || (websiteUrl ? (matchType === 'FACEBOOK_FALLBACK' ? 'VERIFIED_FACEBOOK' : 'VERIFIED_ACTIVE') : 'UNVERIFIED'),
     confidence_score: confidence,
     match_type: matchType,
@@ -293,14 +449,18 @@ app.get("/api/health", (_req, res) => {
 // Single Company Enrichment API
 app.post("/api/enrich-single", async (req, res) => {
   try {
-    const { id, companyName, county, companyNumber, modelName, forceRefresh } = req.body;
+    const { id, companyName, county, companyNumber, websiteUrl, modelName, forceRefresh } = req.body;
     if (!companyName || !county) {
       return res.status(400).json({ error: "companyName and county are required." });
     }
 
+    const websiteText = websiteUrl ? await scrapeWebsiteText(websiteUrl) : null;
+
     const enrichment = await enrichBusinessRecord(companyName, county, companyNumber, {
       modelName,
       forceRefresh,
+      websiteUrl,
+      websiteText,
     });
     res.json({ id, ...enrichment });
   } catch (error: any) {
@@ -320,17 +480,23 @@ app.post("/api/enrich-batch", async (req, res) => {
     }
 
     const results = [];
-    // Process companies with concurrency limit of 3 to ensure fast and reliable execution
-    const batchSize = 3;
-    for (let i = 0; i < companies.length; i += batchSize) {
-      const chunk = companies.slice(i, i + batchSize);
+    // Process companies with configurable concurrency limit (default 5 for fast parallel execution)
+    const concurrency = typeof req.body.concurrency === 'number' && req.body.concurrency >= 1 && req.body.concurrency <= 10
+      ? req.body.concurrency
+      : 5;
+
+    for (let i = 0; i < companies.length; i += concurrency) {
+      const chunk = companies.slice(i, i + concurrency);
       const chunkPromises = chunk.map(async (company: any) => {
         try {
+          const urlToScrape = company.websiteUrl || company.official_website_url;
+          const websiteText = urlToScrape ? await scrapeWebsiteText(urlToScrape) : null;
+          
           const enrichment = await enrichBusinessRecord(
             company.companyName,
             company.county || company.address4,
             company.companyNumber,
-            { modelName, forceRefresh }
+            { modelName, forceRefresh, websiteUrl: urlToScrape, websiteText }
           );
           return {
             id: company.id,
@@ -370,6 +536,91 @@ app.post("/api/enrich-batch", async (req, res) => {
   }
 });
 
+// High-Speed Bulk Pre-Sweep Lead Screening API (Cheap Sweep for Websites)
+app.post("/api/pre-sweep", async (req, res) => {
+  try {
+    const { companies, modelName } = req.body;
+    if (!Array.isArray(companies) || companies.length === 0) {
+      return res.status(400).json({ error: "companies must be a non-empty array." });
+    }
+
+    console.log("Calling getGeminiClient"); const ai = getGeminiClient();
+    // Force Gemini for the Pre-Sweep because it requires Google Search Grounding
+    const targetModel = "gemini-2.5-flash-8b";
+
+    // Split input list into small chunks for reliable Google Search Grounding website lookup
+    const chunkSize = 3;
+    const chunks = [];
+    for (let i = 0; i < companies.length; i += chunkSize) {
+      chunks.push(companies.slice(i, i + chunkSize));
+    }
+
+    const chunkPromises = chunks.map(async (chunk) => {
+      const promptData = chunk.map((c) => ({
+        id: c.id,
+        companyName: c.companyName,
+        county: c.county || c.address4 || "Ireland",
+      }));
+
+      const systemPrompt = `You are a high-speed data extraction agent.
+YOUR TASK: Perform a "cheap sweep" to identify ONLY the official website URL for each of the following Irish businesses.
+You MUST return exactly ${chunk.length} items in your JSON array, corresponding exactly to the input IDs.
+Do not search for or hallucinate any other data. If a website cannot be found, return null for that company.`;
+
+      try {
+        const response = await ai.models.generateContent({
+          model: targetModel,
+          contents: `${systemPrompt}\n\nBusinesses to sweep:\n${JSON.stringify(promptData, null, 2)}`,
+          config: {
+            temperature: 0.1,
+            //
+            tools: [{ googleSearch: {} }],
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  websiteUrl: {
+                    type: Type.STRING,
+                    description: "The official website URL (starting with http/https) or null if not found."
+                  }
+                },
+                required: ["id"]
+              }
+            }
+          }
+        });
+
+        const text = response.text?.trim() || "[]";
+        let parsed = [];
+        try {
+          parsed = JSON.parse(text);
+        } catch (e) {
+          console.warn("Failed to parse JSON response from pre-sweep chunk:", text);
+        }
+        return parsed;
+      } catch (err: any) {
+        console.error("Error processing pre-sweep chunk:", err);
+        return chunk.map((item) => ({
+          id: item.id,
+          websiteUrl: null,
+        }));
+      }
+    });
+
+    const chunkResults = await Promise.all(chunkPromises);
+    const results = chunkResults.flat();
+
+    res.json({ results });
+  } catch (error: any) {
+    console.error("Error in /api/pre-sweep:", error);
+    res.status(500).json({
+      error: error.message || "High-speed pre-sweep failed.",
+    });
+  }
+});
+
 // Google Maps Grounding API
 app.post("/api/maps-search", async (req, res) => {
   try {
@@ -378,7 +629,7 @@ app.post("/api/maps-search", async (req, res) => {
       return res.status(400).json({ error: "Search query is required." });
     }
 
-    const ai = getGeminiClient();
+    console.log("Calling getGeminiClient"); const ai = getGeminiClient();
     const prompt = `Search Google Maps for the following Irish business query in County ${county || "Ireland"}: "${query}".
 Return place name, full street address, county, website URL if available, rating, and brief description.
 Provide the response as a clear structured JSON array of place objects.`;
@@ -414,7 +665,7 @@ app.post("/api/ai-analyze-dataset", async (req, res) => {
       return res.status(400).json({ error: "records array is required." });
     }
 
-    const ai = getGeminiClient();
+    console.log("Calling getGeminiClient"); const ai = getGeminiClient();
     const summaryData = records.slice(0, 50).map((r: any) => ({
       name: r.companyName,
       county: r.county,
@@ -457,7 +708,7 @@ app.post("/api/voice-assistant", async (req, res) => {
       return res.status(400).json({ error: "Prompt text is required." });
     }
 
-    const ai = getGeminiClient();
+    console.log("Calling getGeminiClient"); const ai = getGeminiClient();
 
     // Generate concise conversational text answer
     const textResponse = await ai.models.generateContent({

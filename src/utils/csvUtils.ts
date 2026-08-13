@@ -86,29 +86,31 @@ export function smartExtractAndHealRecords(
 
   // 1. Initial Keyword Header Identification
   let companyNumberKey = headers.find((h) =>
-    /^(company_num|cro_number|company_number|company\s*number|cro|kmt|reg\s*no|registration|number|id|code|ref)$/i.test(h)
+    /^(company_num|cro_number|company_number|company\s*number|cro|kmt|reg\s*no|registration)$/i.test(h.trim())
   ) || headers.find((h) =>
-    /company_num|cro_number|company\s*number|cro|kmt|reg\s*no|registration|number|id|code|ref/i.test(h)
+    /company_num|cro_number|company\s*number|cro|kmt|reg\s*no/i.test(h.trim())
+  ) || headers.find((h) =>
+    /^(number|id|ref)$/i.test(h.trim())
   ) || headers[0];
 
   let companyNameKey = headers.find((h) =>
-    /^(company_name|business_name|company\s*name|business\s*name)$/i.test(h)
+    /^(company_name|business_name|company\s*name|business\s*name)$/i.test(h.trim())
   ) || headers.find((h) =>
-    /company\s*name|business\s*name|firm|organization|entity|trader|name|title/i.test(h)
+    /company\s*name|business\s*name|firm|organization|entity|trader|name|title/i.test(h.trim())
   ) || headers[1] || headers[0];
 
   let countyKey = headers.find((h) =>
-    /^(county|company_address_4|company_address_3|company_address_2|address\s*4|address4)$/i.test(h)
+    /^(county|company_address_4|company_address_3|company_address_2|address\s*4|address4)$/i.test(h.trim())
   ) || headers.find((h) =>
-    /address\s*4|county|address4|company_address|location|region|city|town|area|district/i.test(h)
+    /address\s*4|county|address4|company_address|location|region|city|town|area|district/i.test(h.trim())
   ) || headers[2] || headers[headers.length - 1];
 
   const decisionMakerNameKey = headers.find((h) =>
-    /decision\s*maker|ceo|executive|director|contact\s*name|owner|manager|key\s*person/i.test(h)
+    /decision\s*maker|ceo|executive|director|contact\s*name|owner|manager|key\s*person/i.test(h.trim())
   );
 
   const decisionMakerRoleKey = headers.find((h) =>
-    /role|title|position|job\s*title/i.test(h)
+    /role|title|position|job\s*title/i.test(h.trim())
   );
 
   // 2. Content Sampling (Check sample rows to detect swapped or misaligned columns)
@@ -131,7 +133,8 @@ export function smartExtractAndHealRecords(
 
   // 3. Auto-Heal Header Swaps (e.g. "Company Number" contains names, "Company Name" contains numbers)
   if (
-    (numberColNameCount > numberColDigitCount || nameColDigitCount > nameColNameCount) &&
+    ((numberColNameCount > numberColDigitCount && numberColNameCount > sampleRows.length * 0.4) || 
+     (nameColDigitCount > nameColNameCount && nameColDigitCount > sampleRows.length * 0.4)) &&
     companyNumberKey !== companyNameKey
   ) {
     const temp = companyNumberKey;
@@ -148,20 +151,29 @@ export function smartExtractAndHealRecords(
   rows.forEach((row: any, index: number) => {
     let companyName = (row[companyNameKey] || '').toString().trim();
     let companyNumber = (row[companyNumberKey] || '').toString().trim();
-    let countyRaw = (row[countyKey] || '').toString().trim();
+    let countyRaw = (row[countyKey] || row['COUNTY'] || row['County'] || '').toString().trim();
     let county = extractIrishCountyFromText(
       countyRaw,
+      row['COUNTY'],
+      row['County'],
+      row['county'],
       row['company_address_4'],
       row['company_address_3'],
       row['company_address_2'],
       row['company_address_1'],
       row['Address4'],
-      row['Address 4'],
-      row['County']
+      row['Address 4']
     );
 
-    const dmName = decisionMakerNameKey ? (row[decisionMakerNameKey] || '').toString().trim() : undefined;
-    const dmRole = decisionMakerRoleKey ? (row[decisionMakerRoleKey] || '').toString().trim() : undefined;
+    const dmName = (row['DECISION MAKER'] || (decisionMakerNameKey ? row[decisionMakerNameKey] : '') || '').toString().trim();
+    const dmRole = (row['DM ROLE'] || (decisionMakerRoleKey ? row[decisionMakerRoleKey] : '') || '').toString().trim();
+    const website = (row['WEBSITEE'] || row['WEBSITE'] || row['official_website_url'] || '').toString().trim();
+    const phone = (row['PHONE NUMBER'] || row['PHONE'] || '').toString().trim();
+    const email = (row['EMAIL'] || '').toString().trim();
+    const estSize = (row['ESTIMATED SIZE'] || '').toString().trim();
+    const linkedin = (row['LINKEDIN PROFILE (DM or Business)'] || row['LINKEDIN'] || '').toString().trim();
+    const icp = (row['ICP RATING /100'] || '').toString().trim();
+    const pbsReason = (row['REASON FOR PBS NEED'] || '').toString().trim();
 
     // Row-level check: Is companyName actually a numeric CRO and companyNumber actually a company name?
     if (isNumericCroNumber(companyName) && isCompanyName(companyNumber)) {
@@ -189,12 +201,20 @@ export function smartExtractAndHealRecords(
         companyNumber: companyNumber || `INC-${1000 + index}`,
         companyName,
         county,
-        status: 'PENDING',
-        official_website_url: null,
+        status: website ? 'SUCCESS' : 'PENDING',
+        official_website_url: website || null,
         decisionMakerName: dmName || null,
         decisionMakerRole: dmRole || null,
-        confidence_score: 'NONE',
-        match_type: 'UNPROCESSED',
+        phoneNumber: phone || null,
+        contactEmail: email || null,
+        estimatedSize: estSize || null,
+        linkedinUrl: linkedin || null,
+        icpRating: icp ? parseInt(icp) || null : null,
+        reasonForPbsNeed: pbsReason || null,
+        confidence_score: website ? 'HIGH' : 'NONE',
+        match_type: website ? 'OFFICIAL_WEBSITE' : 'UNPROCESSED',
+        rawRowData: row,
+        originalHeaders: Object.keys(row),
       });
     }
   });
@@ -523,16 +543,49 @@ export function exportRecordsToCSV(records: CompanyRecord[], filterProcessedOnly
       updated_at: new Date().toISOString(),
     };
 
-    // Append enriched columns in strict predictable sequence
-    baseRow['official_website_url'] = r.official_website_url || 'N/A';
-    baseRow['confidence_score'] = r.confidence_score;
-    baseRow['match_type'] = r.match_type;
-    baseRow['status'] = r.status;
-    baseRow['notes'] = r.notes || '';
-    baseRow['decisionMakerName'] = r.decisionMakerName || 'N/A';
-    baseRow['decisionMakerRole'] = r.decisionMakerRole || 'N/A';
-    baseRow['phoneNumber'] = r.phoneNumber || 'N/A';
-    baseRow['contactEmail'] = r.contactEmail || 'N/A';
+    // Append / sync enriched columns in strict predictable sequence
+    if ('COUNTY' in baseRow || !('company_address_4' in baseRow)) {
+      baseRow['COUNTY'] = r.county;
+    }
+    
+    // Flexibly map WEBSITE columns to catch typos like WEBSITEE
+    const websiteKey = Object.keys(baseRow).find(k => k.trim().toUpperCase().startsWith('WEBSITE'));
+    if (websiteKey) {
+      baseRow[websiteKey] = r.official_website_url || 'N/A';
+    } else {
+      baseRow['WEBSITE'] = r.official_website_url || 'N/A';
+    }
+
+    const phoneKey = Object.keys(baseRow).find(k => k.trim().toUpperCase().includes('PHONE'));
+    if (phoneKey) {
+      baseRow[phoneKey] = r.phoneNumber || 'N/A';
+    } else {
+      baseRow['PHONE NUMBER'] = r.phoneNumber || 'N/A';
+    }
+
+    const emailKey = Object.keys(baseRow).find(k => k.trim().toUpperCase().includes('EMAIL'));
+    if (emailKey) {
+      baseRow[emailKey] = r.contactEmail || 'N/A';
+    } else {
+      baseRow['EMAIL'] = r.contactEmail || 'N/A';
+    }
+
+    baseRow["Industry"] = r.industry || "N/A";
+    baseRow["Company Summary"] = r.companySummary || "N/A";
+    baseRow["Estimated Size"] = r.estimatedSize || "N/A";
+    baseRow["Decision Maker"] = r.decisionMakerName || "N/A";
+    baseRow["DM Role"] = r.decisionMakerRole || "N/A";
+    baseRow["LinkedIn Profile"] = r.linkedinUrl || "N/A";
+    baseRow["LinkedIn Type"] = r.linkedinType || "N/A";
+    baseRow["ICP Rating (/100)"] = r.icpRating ?? "N/A";
+    baseRow["Reason for PBS Need"] = r.reasonForPbsNeed || "N/A";
+    baseRow["Match Type"] = r.match_type || "N/A";
+    baseRow["Confidence Score"] = r.confidence_score || "N/A";
+    baseRow["Verification Status"] = r.verificationStatus || "N/A";
+    baseRow["Enrichment Status"] = r.status;
+    baseRow["Internal Notes"] = r.notes || "";
+
+
 
     return baseRow;
   });

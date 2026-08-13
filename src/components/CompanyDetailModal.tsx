@@ -122,10 +122,15 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
           </div>
 
           {/* Lead Research & Verification Cards */}
-          {(company.industry || company.companySummary || company.phoneNumber || company.contactEmail || company.decisionMakerName || company.linkedinUrl) && (
+          {(company.industry || company.companySummary || company.phoneNumber || company.contactEmail || company.decisionMakerName || company.linkedinUrl || company.icpRating !== undefined || company.reasonForPbsNeed) && (
             <div className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-xl space-y-3">
-              <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" /> B2B Lead Verification Intelligence
+              <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wider flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" /> B2B Lead Verification Intelligence
+                </span>
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">
+                  COUNTY: {company.county}
+                </span>
               </h4>
 
               <div className="grid grid-cols-2 gap-3 text-xs">
@@ -168,10 +173,10 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
                     <p className="font-semibold text-slate-800 mt-0.5">{company.industry}</p>
                   </div>
                 )}
-                {company.verificationStatus && (
+                {company.estimatedSize && (
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-500">Lead Status</span>
-                    <p className="font-semibold text-emerald-700 mt-0.5">{company.verificationStatus}</p>
+                    <span className="text-[10px] uppercase font-bold text-slate-500">Estimated Size</span>
+                    <p className="font-semibold text-slate-800 mt-0.5">{company.estimatedSize}</p>
                   </div>
                 )}
                 {company.phoneNumber && (
@@ -187,6 +192,32 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* PBS = Peninsula Business Services Need Assessment */}
+              {(company.icpRating !== undefined || company.reasonForPbsNeed) && (
+                <div className="pt-2.5 border-t border-emerald-200/80 bg-white/70 p-3 rounded-lg border">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-500" /> PBS Need Assessment
+                      <span className="text-[9px] font-normal text-slate-500 normal-case">(Peninsula Business Services: HR & Safety)</span>
+                    </span>
+                    {company.icpRating !== null && company.icpRating !== undefined && (
+                      <span className={`px-2 py-0.5 text-xs font-extrabold rounded-md ${
+                        company.icpRating >= 70 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                        company.icpRating >= 40 ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                        'bg-slate-100 text-slate-700 border border-slate-300'
+                      }`}>
+                        ICP RATING: {company.icpRating}/100
+                      </span>
+                    )}
+                  </div>
+                  {company.reasonForPbsNeed && (
+                    <p className="text-xs text-slate-700 font-medium leading-relaxed mt-1">
+                      <span className="font-bold text-slate-900">Reason for PBS Need:</span> {company.reasonForPbsNeed}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {company.companySummary && (
                 <div className="pt-2 border-t border-emerald-200/60">

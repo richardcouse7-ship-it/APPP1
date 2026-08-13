@@ -4,6 +4,10 @@ export type MatchType = 'OFFICIAL_WEBSITE' | 'FACEBOOK_FALLBACK' | 'NOT_FOUND' |
 
 export type ConfidenceScore = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
 
+export type SweepStatus = 'SWEPT_FOUND' | 'SWEPT_NOT_FOUND' | 'UNSCREENED';
+
+
+
 export interface GroundingSource {
   title: string;
   url: string;
@@ -28,9 +32,15 @@ export interface CompanyRecord {
   confidence_score: ConfidenceScore;
   match_type: MatchType;
   notes?: string;
+  sweepStatus?: SweepStatus;
+  
+  
   grounding_sources?: GroundingSource[];
   processedAt?: string;
   isManualEdit?: boolean;
+  estimatedSize?: string | null;
+  icpRating?: number | null;
+  reasonForPbsNeed?: string | null;
   // Raw incoming file data for exact column sequence preservation
   rawRowData?: Record<string, any>;
   originalHeaders?: string[];

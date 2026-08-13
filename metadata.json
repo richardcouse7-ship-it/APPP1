@@ -1,6 +1,8 @@
 {
-  "name": "Irish B2B Website Finder",
+  "name": "Remix Remix Irish B2B Website Finder (TEST)",
   "description": "Irish business lead enrichment tool to extract official website URLs using Google Search grounding.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

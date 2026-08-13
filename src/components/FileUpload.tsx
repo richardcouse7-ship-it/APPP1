@@ -28,6 +28,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [autoCorrections, setAutoCorrections] = useState<string[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [loadedCount, setLoadedCount] = useState<number>(0);
   const [showFormatGuide, setShowFormatGuide] = useState(false);
   const [showSingleSearch, setShowSingleSearch] = useState(false);
   const [singleName, setSingleName] = useState('');
@@ -49,6 +50,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       match_type: 'UNPROCESSED',
     };
 
+    setLoadedCount(1);
     onRecordsUploaded([newRecord]);
     setSingleName('');
     setSingleCounty('');
@@ -108,6 +110,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       setAutoCorrections(corrections);
     }
     if (records.length > 0) {
+      setLoadedCount(records.length);
       onRecordsUploaded(records);
     }
   };
@@ -168,6 +171,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       if (corrections && corrections.length > 0) {
         setAutoCorrections(corrections);
       }
+      setLoadedCount(records.length);
       onRecordsUploaded(records);
       setFileName(`Google Sheet: ${file.name}`);
       setShowDriveModal(false);
@@ -372,7 +376,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           <div className="text-sm font-medium text-slate-800">
             {fileName ? (
               <span className="text-emerald-700 font-bold flex items-center gap-1.5">
-                <Check className="w-4 h-4 text-emerald-600" /> Loaded: {fileName} ({currentCount} records)
+                <Check className="w-4 h-4 text-emerald-600" /> Loaded: {fileName} ({loadedCount} records)
               </span>
             ) : (
               <>

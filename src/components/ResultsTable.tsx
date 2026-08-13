@@ -40,6 +40,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
   onGoogleSignIn,
 }) => {
   const [editingRecord, setEditingRecord] = useState<CompanyRecord | null>(null);
+  const [qualificationFilter, setQualificationFilter] = useState<'ALL' | 'QUALIFIED' | 'DISQUALIFIED' | 'NEEDS_REVIEW' | 'UNSCREENED'>('ALL');
   const [filters, setFilters] = useState<FilterState>({
     searchTerm: '',
     countyFilter: 'ALL',
@@ -80,6 +81,12 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
   // Filtered dataset
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
+      // Qualification Filter
+      if (qualificationFilter !== 'ALL') {
+        const qStatus = r.qualificationStatus || 'UNSCREENED';
+        if (qStatus !== qualificationFilter) return false;
+      }
+
       // Toggle: Show Only Duplicates
       if (showOnlyDuplicates) {
         if (!duplicateAnalysis.duplicateRecordIds.has(r.id)) return false;
@@ -374,17 +381,34 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
           </div>
 
           {/* Filter Dropdowns Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5">
             {/* Search Box */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Search name, CRO, decision maker..."
+                placeholder="Search name, CRO..."
                 value={filters.searchTerm}
                 onChange={(e) => setFilters({ ...filters, searchTerm: e.target.value })}
                 className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-medium"
               />
+            </div>
+
+            {/* Pre-Sweep Qualification Triage Filter */}
+            <div className="relative">
+              <select
+                value={qualificationFilter}
+                onChange={(e) => setQualificationFilter(e.target.value as any)}
+                className={`w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 font-bold ${
+                  qualificationFilter !== 'ALL' ? 'border-amber-500 text-amber-900 bg-amber-50/50' : 'border-slate-300 text-slate-700'
+                }`}
+              >
+                <option value="ALL">Triage: All Leads</option>
+                <option value="QUALIFIED">🟢 Qualified B2B Companies</option>
+                <option value="DISQUALIFIED">🔴 Disqualified / Useless</option>
+                <option value="NEEDS_REVIEW">🟡 Needs Review</option>
+                <option value="UNSCREENED">⚪ Unscreened</option>
+              </select>
             </div>
 
             {/* Status Filter */}
@@ -586,14 +610,13 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                 </button>
               </th>
               <th className="py-3 px-3">Company Name</th>
-              <th className="py-3 px-3">CRO / County</th>
-              <th className="py-3 px-3 min-w-[200px]">Official Website URL</th>
-              <th className="py-3 px-3">Key Decision Maker</th>
-              <th className="py-3 px-3">LinkedIn Search</th>
-              <th className="py-3 px-3">Industry / Sector</th>
-              <th className="py-3 px-3">Verified Contact Info</th>
-              <th className="py-3 px-3">Match Type</th>
-              <th className="py-3 px-3">Confidence</th>
+              <th className="py-3 px-3">CRO / COUNTY</th>
+              <th className="py-3 px-3">Address & Eircode</th>
+              <th className="py-3 px-3 min-w-[180px]">Digital Footprint</th>
+              <th className="py-3 px-3">Contact & DM</th>
+              <th className="py-3 px-3">Industry / Size</th>
+              <th className="py-3 px-3">PBS Need (Peninsula)</th>
+              <th className="py-3 px-3">Data Quality</th>
               <th className="py-3 px-3 text-right">Actions</th>
             </tr>
           </thead>
@@ -639,10 +662,27 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     </td>
 
                     {/* Company Name */}
-                    <td className="py-3 px-3 font-bold text-slate-900 flex items-center gap-2">
-                      <span>{record.companyName}</span>
-                      {record.status === 'PROCESSING' && (
-                        <RefreshCw className="w-3 h-3 text-emerald-600 animate-spin shrink-0" />
+                    <td className="py-3 px-3">
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span>{record.companyName}</span>
+                        {record.status === 'PROCESSING' && (
+                          <RefreshCw className="w-3 h-3 text-emerald-600 animate-spin shrink-0" />
+                        )}
+                      </div>
+                      {record.qualificationStatus === 'QUALIFIED' && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 mt-0.5 rounded text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          🟢 B2B Qualified
+                        </span>
+                      )}
+                      {record.qualificationStatus === 'DISQUALIFIED' && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 mt-0.5 rounded text-[10px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200" title={record.qualificationReason}>
+                          🔴 Disqualified ({record.businessType === 'SOLE_TRADER' ? 'Sole Trader' : record.businessType === 'DISSOLVED_INACTIVE' ? 'Defunct' : 'Useless Lead'})
+                        </span>
+                      )}
+                      {record.qualificationStatus === 'NEEDS_REVIEW' && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 mt-0.5 rounded text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                          🟡 Needs Review
+                        </span>
                       )}
                     </td>
 
@@ -659,105 +699,137 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className="font-semibold text-slate-700 text-[11px]">Co. {record.county}</div>
+                      <div className="mt-0.5">
+                        <span className="font-bold text-slate-900 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                          {record.county}
+                        </span>
+                      </div>
                     </td>
 
-                    {/* Official Website URL */}
+                    {/* Address & Eircode */}
                     <td className="py-3 px-3">
-                      {record.official_website_url ? (
-                        <div className="flex items-center space-x-1.5 max-w-[220px]">
-                          <a
-                            href={record.official_website_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="font-mono text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:underline truncate flex items-center gap-1"
-                          >
-                            <span className="truncate">{record.official_website_url}</span>
-                            <ExternalLink className="w-3 h-3 text-emerald-600 shrink-0" />
-                          </a>
-                          <button
-                            type="button"
-                            onClick={(e) => handleCopyUrl(record.official_website_url!, record.id, e)}
-                            className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors shrink-0"
-                            title="Copy URL"
-                          >
-                            {copiedId === record.id ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      ) : record.status === 'SUCCESS' ? (
-                        <span className="text-slate-400 italic text-[11px]">No Official Domain</span>
-                      ) : record.status === 'PROCESSING' ? (
-                        <span className="text-emerald-600 font-medium text-[11px] animate-pulse">Researching website...</span>
-                      ) : (
-                        <span className="text-slate-400 text-[11px]">Pending Step 2</span>
-                      )}
+                      <div className="text-[10px] text-slate-600 space-y-0.5">
+                        {record.rawRowData?.['company_address_1'] && <div className="truncate max-w-[120px]">{record.rawRowData['company_address_1']}</div>}
+                        {record.rawRowData?.['company_address_2'] && <div className="truncate max-w-[120px]">{record.rawRowData['company_address_2']}</div>}
+                        {record.rawRowData?.['company_address_3'] && <div className="truncate max-w-[120px]">{record.rawRowData['company_address_3']}</div>}
+                        {record.rawRowData?.['eircode'] && <div className="font-semibold text-slate-800">{record.rawRowData['eircode']}</div>}
+                        {!record.rawRowData?.['company_address_1'] && !record.rawRowData?.['eircode'] && <span className="text-slate-300">&mdash;</span>}
+                      </div>
                     </td>
 
-                    {/* Key Decision Maker */}
+                    {/* Digital Footprint (Website + LinkedIn) */}
                     <td className="py-3 px-3">
-                      {record.decisionMakerName ? (
-                        <div className="space-y-0.5 max-w-[170px]">
-                          <div className="flex items-center text-slate-900 font-bold text-xs gap-1 truncate">
-                            <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span className="truncate">{record.decisionMakerName}</span>
+                      <div className="space-y-1.5 min-w-[140px] max-w-[200px]">
+                        {/* Website */}
+                        {record.official_website_url ? (
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={record.official_website_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="font-mono text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline truncate flex items-center gap-1"
+                            >
+                              <Globe className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span className="truncate">{record.official_website_url}</span>
+                            </a>
+                            <button
+                              type="button"
+                              onClick={(e) => handleCopyUrl(record.official_website_url!, record.id, e)}
+                              className="p-0.5 text-slate-400 hover:text-slate-700 rounded transition-colors shrink-0"
+                              title="Copy URL"
+                            >
+                              {copiedId === record.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            </button>
                           </div>
-                          {record.decisionMakerRole && (
-                            <div className="text-[10px] font-semibold text-slate-500 truncate pl-4">
-                              {record.decisionMakerRole}
+                        ) : record.status === 'SUCCESS' ? (
+                          <span className="text-slate-400 italic text-[11px]">No Website</span>
+                        ) : record.status === 'PROCESSING' ? (
+                          <span className="text-emerald-600 font-medium text-[11px] animate-pulse">Researching...</span>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">Pending Step 2</span>
+                        )}
+
+                        {/* LinkedIn */}
+                        {record.linkedinUrl ? (
+                          <div>
+                            <a
+                              href={record.linkedinUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors border ${
+                                record.linkedinType === 'DECISION_MAKER'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800'
+                                  : 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 hover:text-sky-800'
+                              }`}
+                            >
+                              <Linkedin className="w-3 h-3 mr-1 shrink-0 text-blue-600" />
+                              <span>{record.linkedinType === 'DECISION_MAKER' ? 'DM Profile' : 'Company Page'}</span>
+                              <ExternalLink className="w-2.5 h-2.5 ml-1 opacity-70 shrink-0" />
+                            </a>
+                          </div>
+                        ) : record.status === 'SUCCESS' ? (
+                          <span className="inline-flex items-center text-slate-400 text-[10px] italic gap-1">
+                            <Linkedin className="w-3 h-3 text-slate-300 shrink-0" /> LinkedIn Not Found
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+
+                    {/* Contact & DM */}
+                    <td className="py-3 px-3">
+                      <div className="space-y-1.5 min-w-[150px] max-w-[200px]">
+                        {/* DM Info */}
+                        {record.decisionMakerName ? (
+                          <div className="space-y-0.5">
+                            <div className="flex items-center text-slate-900 font-bold text-[11px] gap-1 truncate">
+                              <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span className="truncate">{record.decisionMakerName}</span>
+                            </div>
+                            {record.decisionMakerRole && (
+                              <div className="text-[10px] font-semibold text-slate-500 truncate pl-4.5">
+                                {record.decisionMakerRole}
+                              </div>
+                            )}
+                          </div>
+                        ) : record.status === 'SUCCESS' ? (
+                          <span className="text-slate-400 text-[11px] italic block">No DM Listed</span>
+                        ) : (
+                          <span className="text-slate-300 text-[11px] block">&mdash;</span>
+                        )}
+
+                        {/* Contact Channels */}
+                        {(record.phoneNumber || record.contactEmail) && (
+                          <div className="space-y-0.5 text-[10px] border-t border-slate-100 pt-1 mt-1">
+                            {record.phoneNumber && (
+                              <div className="flex items-center text-slate-700 font-mono gap-1">
+                                <Phone className="w-3 h-3 text-emerald-600 shrink-0" /> {record.phoneNumber}
+                              </div>
+                            )}
+                            {record.contactEmail && (
+                              <div className="flex items-center text-slate-600 font-mono gap-1 truncate max-w-[150px]">
+                                <Mail className="w-3 h-3 text-blue-600 shrink-0" /> {record.contactEmail}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Industry / Size */}
+                    <td className="py-3 px-3">
+                      {record.industry ? (
+                        <div className="space-y-0.5 max-w-[150px]">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-800 border border-slate-200 truncate max-w-full">
+                            <Building className="w-3 h-3 mr-1 text-slate-500 shrink-0" /> {record.industry}
+                          </span>
+                          {record.estimatedSize && (
+                            <div className="text-[10px] font-medium text-slate-500 pl-1">
+                              Size: {record.estimatedSize}
                             </div>
                           )}
                         </div>
-                      ) : record.status === 'SUCCESS' ? (
-                        <span className="text-slate-400 text-[11px] italic">Not listed</span>
-                      ) : (
-                        <span className="text-slate-300 text-[11px]">&mdash;</span>
-                      )}
-                    </td>
-
-                    {/* LinkedIn Search (DM Profile / Business Page / Not Found) */}
-                    <td className="py-3 px-3">
-                      {record.linkedinUrl ? (
-                        <a
-                          href={record.linkedinUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className={`inline-flex items-center px-2 py-1 rounded-md text-[11px] font-semibold transition-colors border ${
-                            record.linkedinType === 'DECISION_MAKER'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800'
-                              : 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 hover:text-sky-800'
-                          }`}
-                          title={`Click to view ${
-                            record.linkedinType === 'DECISION_MAKER' ? 'Decision Maker LinkedIn Profile' : 'Business LinkedIn Page'
-                          }`}
-                        >
-                          <Linkedin className="w-3.5 h-3.5 mr-1 shrink-0 text-blue-600" />
-                          <span>
-                            {record.linkedinType === 'DECISION_MAKER' ? 'DM Profile' : 'Company Page'}
-                          </span>
-                          <ExternalLink className="w-3 h-3 ml-1 opacity-70 shrink-0" />
-                        </a>
-                      ) : record.status === 'SUCCESS' ? (
-                        <span className="inline-flex items-center text-slate-400 text-[11px] italic gap-1">
-                          <Linkedin className="w-3 h-3 text-slate-300 shrink-0" />
-                          <span>LinkedIn Not Found</span>
-                        </span>
-                      ) : (
-                        <span className="text-slate-300 text-[11px]">&mdash;</span>
-                      )}
-                    </td>
-
-                    {/* Industry / Sector */}
-                    <td className="py-3 px-3">
-                      {record.industry ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
-                          <Building className="w-3 h-3 mr-1 text-slate-500" /> {record.industry}
-                        </span>
                       ) : record.status === 'SUCCESS' ? (
                         <span className="text-slate-400 text-[11px] italic">General B2B</span>
                       ) : (
@@ -765,72 +837,73 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                       )}
                     </td>
 
-                    {/* Verified Contact Info */}
-                    <td className="py-3 px-3">
-                      {record.phoneNumber || record.contactEmail ? (
-                        <div className="space-y-0.5 text-[11px]">
-                          {record.phoneNumber && (
-                            <div className="flex items-center text-slate-700 font-mono gap-1">
-                              <Phone className="w-3 h-3 text-emerald-600 shrink-0" /> {record.phoneNumber}
-                            </div>
-                          )}
-                          {record.contactEmail && (
-                            <div className="flex items-center text-slate-600 font-mono gap-1 truncate max-w-[150px]">
-                              <Mail className="w-3 h-3 text-blue-600 shrink-0" /> {record.contactEmail}
-                            </div>
+                    {/* PBS Need (Peninsula Business Services) */}
+                    <td className="py-3 px-3 min-w-[160px]">
+                      {record.icpRating !== null && record.icpRating !== undefined ? (
+                        <div className="space-y-1 max-w-[200px]">
+                          <div className="flex items-center gap-1">
+                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-extrabold ${
+                              record.icpRating >= 70 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                              record.icpRating >= 40 ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                              'bg-slate-100 text-slate-700 border border-slate-300'
+                            }`}>
+                              ICP: {record.icpRating}/100
+                            </span>
+                          </div>
+                          {record.reasonForPbsNeed && (
+                            <p className="text-[10px] text-slate-600 line-clamp-2 leading-tight" title={record.reasonForPbsNeed}>
+                              {record.reasonForPbsNeed}
+                            </p>
                           )}
                         </div>
                       ) : record.status === 'SUCCESS' ? (
-                        <span className="text-slate-400 text-[11px] italic">No public contact</span>
+                        <span className="text-slate-400 text-[11px] italic">Standard HR/Safety</span>
                       ) : (
                         <span className="text-slate-300 text-[11px]">&mdash;</span>
                       )}
                     </td>
 
-                    {/* Match Type Badge */}
-                    <td className="py-3 px-3">
-                      {record.match_type === 'OFFICIAL_WEBSITE' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          <Globe className="w-3 h-3 mr-1 text-emerald-600" /> Official Web
-                        </span>
-                      )}
-                      {record.match_type === 'FACEBOOK_FALLBACK' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                          <Facebook className="w-3 h-3 mr-1 text-amber-600" /> FB Fallback
-                        </span>
-                      )}
-                      {record.match_type === 'NOT_FOUND' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                          Directory Excluded
-                        </span>
-                      )}
-                      {record.match_type === 'UNPROCESSED' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-400 border border-slate-200/60">
-                          Pending
-                        </span>
-                      )}
-                    </td>
 
-                    {/* Confidence Score */}
+
+                    {/* Data Quality (Match Type + Confidence) */}
                     <td className="py-3 px-3">
-                      {record.confidence_score === 'HIGH' && (
-                        <span className="px-2 py-0.5 text-[10px] font-extrabold text-emerald-800 bg-emerald-100/90 rounded">
-                          HIGH
-                        </span>
-                      )}
-                      {record.confidence_score === 'MEDIUM' && (
-                        <span className="px-2 py-0.5 text-[10px] font-extrabold text-amber-800 bg-amber-100/90 rounded">
-                          MEDIUM
-                        </span>
-                      )}
-                      {record.confidence_score === 'LOW' && (
-                        <span className="px-2 py-0.5 text-[10px] font-semibold text-slate-600 bg-slate-100 rounded">
-                          LOW
-                        </span>
-                      )}
-                      {record.confidence_score === 'NONE' && (
-                        <span className="text-slate-400 text-[11px]">&mdash;</span>
-                      )}
+                      <div className="space-y-1">
+                        {record.match_type === 'OFFICIAL_WEBSITE' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <Globe className="w-3 h-3 mr-1 text-emerald-600" /> Web Match
+                          </span>
+                        )}
+                        {record.match_type === 'FACEBOOK_FALLBACK' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                            <Facebook className="w-3 h-3 mr-1 text-amber-600" /> FB Fallback
+                          </span>
+                        )}
+                        {record.match_type === 'NOT_FOUND' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                            Excluded
+                          </span>
+                        )}
+                        {record.match_type === 'UNPROCESSED' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-400 border border-slate-200/60">
+                            Pending
+                          </span>
+                        )}
+
+                        {record.confidence_score !== 'NONE' && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-medium text-slate-400 uppercase tracking-wider">Conf:</span>
+                            {record.confidence_score === 'HIGH' && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-extrabold text-emerald-700 bg-emerald-100/90 rounded">HIGH</span>
+                            )}
+                            {record.confidence_score === 'MEDIUM' && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-extrabold text-amber-700 bg-amber-100/90 rounded">MED</span>
+                            )}
+                            {record.confidence_score === 'LOW' && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-semibold text-slate-600 bg-slate-100 rounded">LOW</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
 
                     {/* Actions */}
