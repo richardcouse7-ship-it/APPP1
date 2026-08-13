@@ -546,7 +546,7 @@ app.post("/api/pre-sweep", async (req, res) => {
 
     console.log("Calling getGeminiClient"); const ai = getGeminiClient();
     // Force Gemini for the Pre-Sweep because it requires Google Search Grounding
-    const targetModel = "gemini-3.5-flash-8b";
+    const targetModel = "gemini-3.5-flash-lite";
 
     // Split input list into small chunks for reliable Google Search Grounding website lookup
     const chunkSize = 3;
